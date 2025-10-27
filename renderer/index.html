@@ -1,0 +1,86 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; connect-src 'self' https://codeload.github.com;" />
+  <title>Custom MC Launcher</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App(){
+      const [nick, setNick] = useState('Yehor');
+      const [ram, setRam] = useState(2048);
+      const [status, setStatus] = useState('Готово.');
+      const [logs, setLogs] = useState([]);
+      const [progress, setProgress] = useState(null);
+
+      useEffect(()=>{
+        window.launcher.onLog((msg)=>{
+          setLogs(prev => [...prev.slice(-200), msg]);
+        });
+        window.launcher.onProgress((p)=>{
+          setProgress(p);
+        });
+      },[]);
+
+      const syncMods = async () => {
+        setStatus('Синхронизация модов...');
+        const res = await window.launcher.syncMods();
+        if(res.ok){
+          setStatus(`Моды синхронизированы (скопировано: ${res.copied}).`);
+        } else {
+          setStatus('Ошибка синхронизации: ' + res.error);
+        }
+      }
+
+      const launch = async () => {
+        setStatus('Запуск Minecraft...');
+        const res = await window.launcher.launch({ username: nick.trim() || 'Player', ramMb: Number(ram) });
+        if(res.ok){
+          setStatus('Minecraft запущен. Возвращайтесь к окну игры.');
+        } else {
+          setStatus('Ошибка запуска: ' + res.error);
+        }
+      }
+
+      return (
+        <div className="wrap">
+          <h1>Custom Launcher 1.12.2 (Forge)</h1>
+          <div className="card">
+            <label>Ник</label>
+            <input value={nick} onChange={e=>setNick(e.target.value)} />
+
+            <label>RAM (MB)</label>
+            <input type="number" value={ram} onChange={e=>setRam(e.target.value)} min="1024" step="256" />
+
+            <div className="row">
+              <button onClick={syncMods}>Синхронизировать моды</button>
+              <button className="primary" onClick={launch}>Запустить</button>
+            </div>
+            {progress && (
+              <div className="progress">
+                <div className="bar" style={{width: (progress.task && progress.task.total ? (progress.task.progress/progress.task.total*100) : 0) + '%'}}></div>
+              </div>
+            )}
+            <div className="status">{status}</div>
+          </div>
+
+          <div className="log">
+            <pre>{logs.join('\n')}</pre>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

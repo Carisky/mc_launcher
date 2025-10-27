@@ -1,0 +1,12 @@
+﻿{
+  "GAME_ROOT": "./runtime", 
+  "FORGE_VERSION": "1.12.2-forge-14.23.5.2860",
+  "JAVA_ARGS": ["-Xmx2G", "-Xms1G"],
+  "GITHUB": {
+    "OWNER": "your-github",
+    "REPO": "your-modpack-repo",
+    "BRANCH": "main",
+    "SUBDIR": "mods" 
+  },
+  "DELETE_EXTRA_MODS": true
+}

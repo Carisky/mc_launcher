@@ -1,0 +1,14 @@
+﻿*{box-sizing:border-box;font-family:Inter,system-ui,Segoe UI,Arial}
+body{margin:0;background:#0f1115;color:#e5e7eb}
+.wrap{max-width:760px;margin:32px auto;padding:0 16px}
+h1{font-weight:700;font-size:22px;margin:0 0 16px}
+.card{background:#151823;border:1px solid #232838;border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+label{display:block;font-size:12px;color:#9aa3b2;margin:8px 0 4px}
+input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a3042;background:#0f1320;color:#e5e7eb}
+.row{display:flex;gap:12px;margin-top:12px}
+button{padding:10px 14px;border-radius:10px;border:1px solid #2a3042;background:#1b2030;color:#e5e7eb;cursor:pointer}
+button.primary{background:#2563eb;border-color:#2563eb}
+.status{margin-top:8px;font-size:13px;color:#b6c2d3}
+.log{margin-top:16px;background:#0a0d13;border:1px solid #1e2333;border-radius:12px;padding:12px;max-height:200px;overflow:auto}
+.progress{height:8px;background:#0a0d13;border:1px solid #1e2333;border-radius:999px;margin-top:12px}
+.progress .bar{height:100%;background:#22c55e;border-radius:999px;width:0}
