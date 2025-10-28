@@ -22,5 +22,23 @@
       }
     }
   ],
+  "SERVERS": [
+    {
+      "id": "main",
+      "name": "Главный сервер",
+      "address": "192.168.195.85",
+      "port": 25565,
+      "refreshIntervalSeconds": 45,
+      "statusApi": null,
+      "rcon": {
+        "host": "192.168.195.85",
+        "port": 25575,
+        "password": "Yolka_today22",
+        "timeoutMs": 5000,
+        "listCommand": "list",
+        "tpsCommand": "tps"
+      }
+    }
+  ],
   "DELETE_EXTRA_MODS": true
 }

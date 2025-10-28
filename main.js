@@ -5,6 +5,10 @@ const fetch = require('node-fetch');
 const extract = require('extract-zip');
 const os = require('os');
 const { Client } = require('minecraft-launcher-core');
+const { Rcon } = require('rcon-client');
+
+const DEFAULT_STATUS_API = 'https://api.mcstatus.io/v2/status/java';
+const MIN_REFRESH_INTERVAL_MS = 10000;
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const configRaw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
@@ -79,6 +83,94 @@ const modpacks = rawModpacks.map((entry, index) => {
     gameRoot: entry.gameRoot || null
   };
 });
+
+const toPositiveInteger = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.floor(num) : null;
+};
+
+const resolveRefreshIntervalMs = (entry = {}) => {
+  const directMs = toPositiveInteger(entry.refreshIntervalMs || entry.refreshMs);
+  if (directMs) return Math.max(MIN_REFRESH_INTERVAL_MS, directMs);
+
+  const seconds = toPositiveInteger(entry.refreshIntervalSeconds || entry.refreshSeconds || entry.refreshInterval);
+  if (seconds) return Math.max(MIN_REFRESH_INTERVAL_MS, seconds * 1000);
+
+  const configMs = toPositiveInteger(config.SERVER_REFRESH_MS);
+  if (configMs) return Math.max(MIN_REFRESH_INTERVAL_MS, configMs);
+
+  const configSeconds = toPositiveInteger(config.SERVER_REFRESH_SECONDS);
+  if (configSeconds) return Math.max(MIN_REFRESH_INTERVAL_MS, configSeconds * 1000);
+
+  return 60000;
+};
+
+const displayServerAddress = (server) => (server.port ? `${server.address}:${server.port}` : server.address);
+
+const normalizeCommand = (value, fallback) => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+};
+
+const normalizeRconConfig = (entry, fallbackAddress, fallbackPort) => {
+  if (!entry || typeof entry !== 'object') return null;
+  const password = entry.password || entry.pass;
+  if (!password) return null;
+
+  const host = String(entry.host || entry.hostname || fallbackAddress || '').trim();
+  const port = toPositiveInteger(entry.port || entry.rconPort) || 25575;
+  const timeoutMs = Math.max(1000, toPositiveInteger(entry.timeoutMs || entry.timeout) || 5000);
+  const rawListCommand = entry.listCommand ?? entry.commands?.list;
+  const rawTpsCommand = entry.tpsCommand ?? entry.commands?.tps;
+  const listCommand = normalizeCommand(rawListCommand, 'list');
+  const tpsCommand = rawTpsCommand === null || rawTpsCommand === false
+    ? null
+    : normalizeCommand(rawTpsCommand, 'tps');
+
+  return {
+    host: host || fallbackAddress,
+    port,
+    password: String(password),
+    timeoutMs,
+    listCommand,
+    tpsCommand
+  };
+};
+
+const resolveStatusApi = (entry) => {
+  if (entry.statusApi === null || entry.statusApi === false) return null;
+  const direct = typeof entry.statusApi === 'string' ? entry.statusApi.trim() : '';
+  if (direct) return direct;
+  const alt = typeof entry.api === 'string' ? entry.api.trim() : '';
+  if (alt) return alt;
+  return DEFAULT_STATUS_API;
+};
+
+const rawServers = Array.isArray(config.SERVERS) ? config.SERVERS : [];
+const servers = rawServers
+  .map((entry, index) => {
+    const address = String(entry.address || entry.host || '').trim();
+    if (!address) return null;
+
+    const port = toPositiveInteger(entry.port) || null;
+    const statusApi = resolveStatusApi(entry);
+    const rcon = normalizeRconConfig(entry.rcon, address, port);
+
+    return {
+      id: String(entry.id || `server-${index + 1}`),
+      name: entry.name || entry.label || `Server ${index + 1}`,
+      address,
+      port,
+      statusApi,
+      refreshIntervalMs: resolveRefreshIntervalMs(entry),
+      rcon
+    };
+  })
+  .filter(Boolean);
+
+const getServerById = (id) => servers.find((server) => server.id === id) || null;
 
 const usePerModpackRoots = Array.isArray(config.MODPACKS) && config.MODPACKS.length > 0;
 
@@ -250,6 +342,231 @@ const serializeModpacks = () => modpacks.map(mp => ({
   forgeVersion: mp.forgeVersion
 }));
 
+const serializeServers = () => servers.map(server => ({
+  id: server.id,
+  name: server.name,
+  address: server.address,
+  port: server.port,
+  displayAddress: displayServerAddress(server),
+  refreshIntervalMs: server.refreshIntervalMs,
+  hasRcon: Boolean(server.rcon),
+  hasStatusApi: Boolean(server.statusApi)
+}));
+
+const mapServerStatusPayload = (payload = {}) => {
+  const toFiniteNumber = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const online = Boolean(payload.online);
+  const playersOnline = toFiniteNumber(payload.players?.online);
+  const playersMax = toFiniteNumber(payload.players?.max);
+  const latency = toFiniteNumber(payload.latency ?? payload.ping ?? payload.response_time ?? payload.duration ?? payload.ms);
+  const icon = typeof payload.icon === 'string' && payload.icon.length ? payload.icon : null;
+
+  const motdClean = Array.isArray(payload.motd?.clean)
+    ? payload.motd.clean.join('\n')
+    : (typeof payload.motd?.clean === 'string' ? payload.motd.clean : null);
+
+  const motdRaw = Array.isArray(payload.motd?.raw)
+    ? payload.motd.raw.join('\n')
+    : (typeof payload.motd?.raw === 'string' ? payload.motd.raw : null);
+
+  const versionName = payload.version?.name_clean || payload.version?.name || payload.version?.name_raw || null;
+
+  const samplePlayers = Array.isArray(payload.players?.list)
+    ? payload.players.list
+        .map((entry) => {
+          if (!entry) return null;
+          if (typeof entry === 'string') return entry;
+          return entry.name_clean || entry.name || entry.name_raw || null;
+        })
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+
+  const tpsRaw = payload.performance?.tps ?? payload.tps ?? payload.debug?.tps ?? null;
+  const tpsCandidate = Array.isArray(tpsRaw)
+    ? tpsRaw.find((entry) => Number.isFinite(Number(entry)))
+    : tpsRaw;
+  const tps = toFiniteNumber(tpsCandidate);
+
+  return {
+    online,
+    playersOnline: playersOnline ?? (online ? 0 : null),
+    playersMax: playersMax ?? null,
+    latencyMs: latency,
+    motd: motdClean || motdRaw || null,
+    version: versionName,
+    samplePlayers,
+    tps,
+    icon,
+    fetchedAt: Date.now()
+  };
+};
+
+const fetchServerStatusViaHttp = async (server) => {
+  if (!server.statusApi) {
+    throw new Error('HTTP status API is not configured for this server.');
+  }
+
+  const apiBase = server.statusApi.replace(/\/+$/, '');
+  const encodedHost = encodeURIComponent(server.address);
+  const targetUrl = server.port
+    ? `${apiBase}/${encodedHost}:${server.port}`
+    : `${apiBase}/${encodedHost}`;
+
+  const res = await fetch(targetUrl);
+  if (!res.ok) {
+    throw new Error(`Status request failed (${res.status} ${res.statusText})`);
+  }
+
+  const payload = await res.json();
+  return mapServerStatusPayload(payload);
+};
+
+const stripMinecraftColorCodes = (value = '') => value.replace(/\u00A7[0-9A-FK-OR]/gi, '');
+
+const parsePlayerListResponse = (raw) => {
+  const cleaned = stripMinecraftColorCodes(String(raw ?? '')).replace(/\r?\n/g, ' ').trim();
+  if (!cleaned) {
+    return { online: null, max: null, players: [] };
+  }
+
+  const noPlayersTokens = [
+    'no players',
+    'none',
+    'not connected',
+    'нет игроков',
+    'игроков нет',
+    'никого'
+  ];
+  const hasNoPlayersToken = noPlayersTokens.some(token => cleaned.toLowerCase().includes(token));
+
+  const countsMatch =
+    cleaned.match(/(\d+)\s*(?:of\s+(?:a\s+)?max(?:imum)?\s+of|of|\/)\s*(\d+)/i) ||
+    cleaned.match(/Players\s*\((\d+)\s*\/\s*(\d+)\)/i) ||
+    cleaned.match(/(\d+)\s*(?:из|\/)\s*(\d+)/i);
+
+  let online = countsMatch ? Number(countsMatch[1]) : null;
+  let max = countsMatch ? Number(countsMatch[2]) : null;
+
+  const numericTokens = cleaned.match(/\d+/g)?.map(Number).filter(Number.isFinite) || [];
+  if (online === null) {
+    if (numericTokens.length >= 2) {
+      [online, max] = numericTokens;
+    } else if (numericTokens.length === 1) {
+      online = numericTokens[0];
+    }
+  } else if (max === null && numericTokens.length >= 2) {
+    max = numericTokens[1];
+  }
+
+  if (hasNoPlayersToken && (online === null || online > 0)) {
+    online = 0;
+  }
+
+  const listSection = cleaned.includes(':') ? cleaned.split(':').slice(1).join(':').trim() : '';
+  const players = listSection
+    ? listSection
+        .split(/[,;]\s*/)
+        .map(name => stripMinecraftColorCodes(name).trim())
+        .filter((name) => Boolean(name) && !/^\d+(?:\s*\/\s*\d+)?$/.test(name))
+    : [];
+
+  if ((online === null || online === undefined) && players.length) {
+    online = players.length;
+  }
+  if (online === null && hasNoPlayersToken) {
+    online = 0;
+  }
+
+  return {
+    online: Number.isFinite(online) ? online : (hasNoPlayersToken ? 0 : null),
+    max: Number.isFinite(max) ? max : null,
+    players
+  };
+};
+
+const parseTpsResponse = (raw) => {
+  const cleaned = stripMinecraftColorCodes(String(raw ?? '').trim());
+  if (!cleaned) return null;
+  const normalized = cleaned.replace(/,/g, '.'); // support locales that use comma as decimal separator
+  const matches = normalized.match(/-?\d+(?:\.\d+)?/g);
+  if (!matches || !matches.length) return null;
+  const numbers = matches
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  if (!numbers.length) return null;
+  const candidate = numbers.find((value) => value > 0) ?? numbers[0];
+  if (!Number.isFinite(candidate)) return null;
+  return Math.max(0, Math.min(candidate, 20));
+};
+
+const fetchServerStatusViaRcon = async (server) => {
+  if (!server.rcon) {
+    throw new Error('RCON is not configured for this server.');
+  }
+
+  const { host, port, password, timeoutMs, listCommand, tpsCommand } = server.rcon;
+  let rcon;
+  try {
+    rcon = await Rcon.connect({ host, port, password, timeout: timeoutMs });
+  } catch (err) {
+    throw new Error(`RCON connection failed: ${err?.message || err}`);
+  }
+
+  try {
+    const listStart = Date.now();
+    const listRaw = await rcon.send(listCommand || 'list');
+    const latency = Date.now() - listStart;
+
+    let tps = null;
+    if (tpsCommand) {
+      try {
+        const tpsRaw = await rcon.send(tpsCommand);
+        tps = parseTpsResponse(tpsRaw);
+      } catch (err) {
+        console.warn(`[server:status] TPS command failed for ${server.id}:`, err);
+      }
+    }
+
+    const listInfo = parsePlayerListResponse(listRaw);
+
+    return {
+      online: true,
+      playersOnline: Number.isFinite(listInfo.online) ? listInfo.online : null,
+      playersMax: Number.isFinite(listInfo.max) ? listInfo.max : null,
+      samplePlayers: listInfo.players.slice(0, 12),
+      tps,
+      latencyMs: latency,
+      motd: null,
+      version: null,
+      icon: null,
+      fetchedAt: Date.now()
+    };
+  } finally {
+    try {
+      if (rcon) {
+        await rcon.end();
+      }
+    } catch (err) {
+      console.warn(`[server:status] Failed to close RCON connection for ${server.id}:`, err);
+    }
+  }
+};
+
+const fetchServerStatus = async (server) => {
+  if (server.rcon) {
+    return fetchServerStatusViaRcon(server);
+  }
+  if (server.statusApi) {
+    return fetchServerStatusViaHttp(server);
+  }
+  throw new Error('No status provider configured for this server.');
+};
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -368,6 +685,7 @@ const ensureForgeInstaller = async (forgeVersion) => {
 ipcMain.handle('app:bootstrap', async () => ({
   settings: serializeSettings(),
   modpacks: serializeModpacks(),
+  servers: serializeServers(),
   activeModpackId,
   paths: activePaths,
   defaults: {
@@ -421,6 +739,41 @@ ipcMain.handle('mods:sync', async () => {
     return { ok: true, ...res, modsDir: activePaths.modsDir };
   } catch (e) {
     return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('server:status', async (_event, serverId) => {
+  const server = getServerById(serverId);
+  if (!server) {
+    return { ok: false, error: 'Unknown server id', serverId };
+  }
+
+  try {
+    const status = await fetchServerStatus(server);
+    return {
+      ok: true,
+      server: {
+        id: server.id,
+        name: server.name,
+        address: server.address,
+        port: server.port,
+        displayAddress: displayServerAddress(server)
+      },
+      status
+    };
+  } catch (err) {
+    console.warn(`[server:status] ${serverId}`, err);
+    return {
+      ok: false,
+      error: err.message || 'Failed to fetch server status',
+      server: {
+        id: server.id,
+        name: server.name,
+        address: server.address,
+        port: server.port,
+        displayAddress: displayServerAddress(server)
+      }
+    };
   }
 });
 

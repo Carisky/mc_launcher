@@ -16,10 +16,11 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
     <script type="text/babel">
-      const { useState, useEffect, useMemo, useRef } = React;
+      const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
       const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+      const MIN_SERVER_REFRESH_MS = 10000;
       const PROFILE_GRADIENTS = [
         "linear-gradient(135deg, #22d3ee 0%, #6366f1 100%)",
         "linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)",
@@ -60,6 +61,8 @@
         const [modpacks, setModpacks] = useState([]);
         const [activeModpackId, setActiveModpackId] = useState(null);
         const [paths, setPaths] = useState({});
+        const [servers, setServers] = useState([]);
+        const [serverStatuses, setServerStatuses] = useState({});
         const [nickname, setNickname] = useState("Player");
         const [ram, setRam] = useState(2048);
         const [status, setStatus] = useState("Загрузка…");
@@ -83,12 +86,22 @@
         const logsRef = useRef(null);
         const readyRef = useRef(false);
         const skipSettingsSync = useRef(false);
+        const serverTimersRef = useRef({});
+        const isMountedRef = useRef(true);
 
         useEffect(() => {
           if (profileModalOpen && profileModalLabelRef.current) {
             profileModalLabelRef.current.focus();
           }
         }, [profileModalOpen]);
+
+        useEffect(() => {
+          return () => {
+            isMountedRef.current = false;
+            Object.values(serverTimersRef.current || {}).forEach((timer) => clearInterval(timer));
+            serverTimersRef.current = {};
+          };
+        }, []);
 
         const applySettings = (
           nextSettings,
@@ -112,6 +125,109 @@
           }
         };
 
+        const getServerDisplayAddress = useCallback((entry) => {
+          if (!entry) return "-";
+          if (entry.displayAddress) return entry.displayAddress;
+          if (entry.address && entry.port) {
+            return `${entry.address}:${entry.port}`;
+          }
+          return entry.address || "-";
+        }, []);
+
+        const formatRelativeTime = useCallback((timestamp) => {
+          if (!timestamp) return "—";
+          const diff = Date.now() - timestamp;
+          if (diff < 1500) return "только что";
+          if (diff < 60000) return `${Math.floor(diff / 1000)} сек назад`;
+          if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`;
+          const date = new Date(timestamp);
+          return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        }, []);
+
+        const formatTps = (tps) => {
+          if (typeof tps !== "number" || !Number.isFinite(tps)) return "—";
+          const rounded = Math.round(tps * 10) / 10;
+          return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+        };
+
+        const formatLatency = (latency) => {
+          if (typeof latency !== "number" || !Number.isFinite(latency)) return "—";
+          return `${latency} мс`;
+        };
+
+        const formatPlayers = (online, max) => {
+          if (typeof online !== "number" || !Number.isFinite(online)) return "—";
+          if (typeof max === "number" && Number.isFinite(max) && max > 0) {
+            return `${online} / ${max}`;
+          }
+          return `${online}`;
+        };
+
+        const refreshServerStatus = useCallback(
+          async (server) => {
+            if (!server || typeof window.launcher?.fetchServerStatus !== "function") {
+              return;
+            }
+
+            const serverId = server.id;
+            setServerStatuses((prev) => ({
+              ...prev,
+              [serverId]: {
+                ...(prev[serverId] || {}),
+                loading: true,
+                error: null
+              }
+            }));
+
+            try {
+              const response = await window.launcher.fetchServerStatus(serverId);
+              if (!isMountedRef.current) {
+                return;
+              }
+              if (response?.ok) {
+                setServerStatuses((prev) => ({
+                  ...prev,
+                  [serverId]: {
+                    loading: false,
+                    error: null,
+                    data: response.status,
+                    server: response.server || server
+                  }
+                }));
+              } else {
+                setServerStatuses((prev) => ({
+                  ...prev,
+                  [serverId]: {
+                    ...(prev[serverId] || {}),
+                    loading: false,
+                    data: response?.status || null,
+                    server: response?.server || server,
+                    error: response?.error || "Не удалось получить статус."
+                  }
+                }));
+              }
+            } catch (error) {
+              if (!isMountedRef.current) {
+                return;
+              }
+              setServerStatuses((prev) => ({
+                ...prev,
+                [serverId]: {
+                  ...(prev[serverId] || {}),
+                  loading: false,
+                  data: null,
+                  server,
+                  error: error?.message || "Не удалось получить статус."
+                }
+              }));
+            }
+          },
+          [setServerStatuses]
+        );
+
+        const canFetchServerStatus =
+          typeof window.launcher?.fetchServerStatus === "function";
+
         useEffect(() => {
           (async () => {
             try {
@@ -119,6 +235,10 @@
               setModpacks(bootstrap.modpacks || []);
               setActiveModpackId(bootstrap.activeModpackId || null);
               setPaths(bootstrap.paths || {});
+              setServers(
+                Array.isArray(bootstrap.servers) ? bootstrap.servers : []
+              );
+              setServerStatuses({});
               setDefaults(
                 bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 }
               );
@@ -144,6 +264,37 @@
             setProgress(payload);
           });
         }, []);
+
+        useEffect(() => {
+          Object.values(serverTimersRef.current || {}).forEach((timer) =>
+            clearInterval(timer)
+          );
+          serverTimersRef.current = {};
+
+          if (
+            !servers.length ||
+            typeof window.launcher?.fetchServerStatus !== "function"
+          ) {
+            return;
+          }
+
+          const timers = {};
+          servers.forEach((server) => {
+            const interval = Math.max(
+              MIN_SERVER_REFRESH_MS,
+              Number(server.refreshIntervalMs) || 60000
+            );
+            const run = () => refreshServerStatus(server);
+            run();
+            timers[server.id] = setInterval(run, interval);
+          });
+
+          serverTimersRef.current = timers;
+
+          return () => {
+            Object.values(timers).forEach((timer) => clearInterval(timer));
+          };
+        }, [servers, refreshServerStatus]);
 
         useEffect(() => {
           if (logsRef.current) {
@@ -243,6 +394,16 @@
           };
           return getProfileVisuals(baseProfile);
         }, [activeProfile, nickname]);
+
+        const serversLoading = useMemo(
+          () =>
+            servers.some((server) => serverStatuses[server.id]?.loading),
+          [servers, serverStatuses]
+        );
+
+        const handleServerStatusRefresh = useCallback(() => {
+          servers.forEach((server) => refreshServerStatus(server));
+        }, [servers, refreshServerStatus]);
 
         const handleRamInput = (value) => {
           setRam(value);
@@ -629,6 +790,150 @@
                   </button>
                 </div>
               </header>
+
+              {servers.length > 0 && (
+                <section className="card server-card">
+                  <div className="server-card-header">
+                    <div>
+                      <h2>Статус сервера</h2>
+                      <p className="subtitle">
+                        Онлайн, TPS и пинг вашего сервера в реальном времени.
+                      </p>
+                    </div>
+                    {canFetchServerStatus ? (
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={handleServerStatusRefresh}
+                        disabled={serversLoading}
+                      >
+                        {serversLoading ? "Обновляем..." : "Обновить"}
+                      </button>
+                    ) : (
+                      <span className="server-card-hint">
+                        Обновление недоступно в этой сборке
+                      </span>
+                    )}
+                  </div>
+
+                  {!canFetchServerStatus && (
+                    <p className="server-status-hint">
+                      Добавьте поддержку обновления статуса в preload, чтобы
+                      включить автоматическое обновление.
+                    </p>
+                  )}
+
+                  <div className="server-status-list">
+                    {servers.map((server) => {
+                      const entry = serverStatuses[server.id] || {};
+                      const data = entry.data;
+                      const icon = data?.icon;
+                      const serverInfo = entry.server || server;
+                      const name = serverInfo?.name || server.name;
+                      const displayAddress = getServerDisplayAddress(serverInfo);
+                      const online = Boolean(data?.online);
+                      const playersOnline =
+                        typeof data?.playersOnline === "number"
+                          ? data.playersOnline
+                          : null;
+                      const playersMax =
+                        typeof data?.playersMax === "number"
+                          ? data.playersMax
+                          : null;
+                      const latency = data?.latencyMs;
+                      const tps = data?.tps;
+                      const lastUpdated = data?.fetchedAt;
+                      const error = entry.error;
+                      const loading = entry.loading;
+                      const fallbackGradient =
+                        PROFILE_GRADIENTS[
+                          sumCharCodes(server.id || server.address) %
+                            PROFILE_GRADIENTS.length
+                        ];
+                      const initial =
+                        (
+                          (name || displayAddress || "S").trim().charAt(0) || "S"
+                        ).toUpperCase();
+
+                      return (
+                        <article className="server-status-entry" key={server.id}>
+                          <div
+                            className="server-status-avatar"
+                            style={{ background: fallbackGradient }}
+                          >
+                            {icon ? (
+                              <img src={icon} alt={`${name} icon`} />
+                            ) : (
+                              <span>{initial}</span>
+                            )}
+                          </div>
+                          <div className="server-status-body">
+                            <div className="server-status-header">
+                              <div className="server-status-title">
+                                <span
+                                  className={`status-dot ${
+                                    online ? "online" : "offline"
+                                  }`}
+                                  aria-hidden="true"
+                                />
+                                <span>{name}</span>
+                              </div>
+                              <span className="server-status-updated">
+                                {loading
+                                  ? "Обновляем..."
+                                  : data
+                                  ? `Обновлено ${formatRelativeTime(lastUpdated)}`
+                                  : canFetchServerStatus
+                                  ? "Ожидаем данные"
+                                  : "Недоступно"}
+                              </span>
+                            </div>
+                            <div className="server-status-address">
+                              IP: <code>{displayAddress}</code>
+                            </div>
+                            <div className="server-status-meta">
+                              <div>
+                                <span className="meta-label">Статус</span>
+                                <span
+                                  className={`meta-value ${
+                                    online ? "online" : "offline"
+                                  }`}
+                                >
+                                  {online ? "Онлайн" : "Оффлайн"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="meta-label">Игроки</span>
+                                <span className="meta-value">
+                                  {formatPlayers(playersOnline, playersMax)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="meta-label">TPS</span>
+                                <span className="meta-value">
+                                  {online ? formatTps(tps) : "—"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="meta-label">Пинг</span>
+                                <span className="meta-value">
+                                  {online ? formatLatency(latency) : "—"}
+                                </span>
+                              </div>
+                            </div>
+                            {data?.motd && (
+                              <p className="server-motd">{data.motd}</p>
+                            )}
+                            {error && !loading && (
+                              <p className="server-status-error">{error}</p>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               <section className="card control-card">
                 <div className="field-grid">

@@ -35,5 +35,23 @@
       }
     }
   ],
+  "SERVERS": [
+    {
+      "id": "main",
+      "name": "Project Server",
+      "address": "play.example.com",
+      "port": 25565,
+      "refreshIntervalSeconds": 45,
+      "statusApi": null,
+      "rcon": {
+        "host": "play.example.com",
+        "port": 25575,
+        "password": "CHANGE_ME",
+        "timeoutMs": 5000,
+        "listCommand": "list",
+        "tpsCommand": "tps"
+      }
+    }
+  ],
   "DELETE_EXTRA_MODS": true
 }

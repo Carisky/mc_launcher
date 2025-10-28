@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('launcher', {
   selectModpack: (modpackId) => invoke('modpack:set', modpackId),
   openModsFolder: (modpackId) => invoke('fs:openModsDir', modpackId),
   syncMods: () => invoke('mods:sync'),
+  fetchServerStatus: (serverId) => invoke('server:status', serverId),
   launch: (payload) => invoke('mc:launch', payload),
   onLog: (cb) => ipcRenderer.on('mc:log', (_, msg) => cb(msg)),
   onProgress: (cb) => ipcRenderer.on('mc:progress', (_, p) => cb(p))
