@@ -1,8 +1,8 @@
-﻿<!doctype html>
+<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; connect-src 'self' https://codeload.github.com;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*; connect-src 'self' https://codeload.github.com;" />
   <title>Custom MC Launcher</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -13,74 +13,397 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
-    function App(){
-      const [nick, setNick] = useState('Yehor');
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+    function App() {
+      const [bootstrapped, setBootstrapped] = useState(false);
+      const [modpacks, setModpacks] = useState([]);
+      const [activeModpackId, setActiveModpackId] = useState(null);
+      const [paths, setPaths] = useState({});
+      const [nickname, setNickname] = useState('Player');
       const [ram, setRam] = useState(2048);
-      const [status, setStatus] = useState('Готово.');
+      const [status, setStatus] = useState('Загрузка…');
       const [logs, setLogs] = useState([]);
       const [progress, setProgress] = useState(null);
+      const [profiles, setProfiles] = useState([]);
+      const [activeProfileId, setActiveProfileId] = useState(null);
+      const [defaults, setDefaults] = useState({ ramMb: 2048, minRamMb: 1024 });
+      const [syncing, setSyncing] = useState(false);
+      const [launching, setLaunching] = useState(false);
+      const logsRef = useRef(null);
+      const readyRef = useRef(false);
+      const skipSettingsSync = useRef(false);
 
-      useEffect(()=>{
-        window.launcher.onLog((msg)=>{
-          setLogs(prev => [...prev.slice(-200), msg]);
+      const applySettings = (nextSettings) => {
+        skipSettingsSync.current = true;
+        setNickname(nextSettings.nickname || 'Player');
+        setRam(nextSettings.ramMb || defaults.ramMb);
+        setProfiles(nextSettings.profiles || []);
+        setActiveProfileId(nextSettings.activeProfileId || null);
+      };
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const bootstrap = await window.launcher.bootstrap();
+            setModpacks(bootstrap.modpacks || []);
+            setActiveModpackId(bootstrap.activeModpackId || null);
+            setPaths(bootstrap.paths || {});
+            setDefaults(bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 });
+            applySettings(bootstrap.settings || {});
+            setStatus('Готово.');
+            setBootstrapped(true);
+            readyRef.current = true;
+          } catch (err) {
+            console.error(err);
+            setStatus('Ошибка инициализации: ' + err.message);
+          }
+        })();
+      }, []);
+
+      useEffect(() => {
+        window.launcher.onLog((msg) => {
+          setLogs((prev) => {
+            const next = [...prev, msg];
+            return next.slice(-500);
+          });
         });
-        window.launcher.onProgress((p)=>{
-          setProgress(p);
+        window.launcher.onProgress((payload) => {
+          setProgress(payload);
         });
-      },[]);
+      }, []);
 
-      const syncMods = async () => {
-        setStatus('Синхронизация модов...');
-        const res = await window.launcher.syncMods();
-        if(res.ok){
-          setStatus(`Моды синхронизированы (скопировано: ${res.copied}).`);
-        } else {
-          setStatus('Ошибка синхронизации: ' + res.error);
+      useEffect(() => {
+        if (logsRef.current) {
+          logsRef.current.scrollTop = logsRef.current.scrollHeight;
         }
-      }
+      }, [logs]);
 
-      const launch = async () => {
-        setStatus('Запуск Minecraft...');
-        const res = await window.launcher.launch({ username: nick.trim() || 'Player', ramMb: Number(ram) });
-        if(res.ok){
-          setStatus('Minecraft запущен. Возвращайтесь к окну игры.');
-        } else {
-          setStatus('Ошибка запуска: ' + res.error);
+      useEffect(() => {
+        if (!readyRef.current) return;
+        if (skipSettingsSync.current) {
+          skipSettingsSync.current = false;
+          return;
         }
-      }
+        const handle = setTimeout(() => {
+          window.launcher.updateSettings({
+            nickname,
+            ramMb: Number(ram)
+          }).catch((err) => console.error(err));
+        }, 400);
+        return () => clearTimeout(handle);
+      }, [nickname, ram]);
+
+      useEffect(() => {
+        if (!readyRef.current) return;
+        if (skipSettingsSync.current) {
+          skipSettingsSync.current = false;
+          return;
+        }
+        window.launcher.updateSettings({
+          activeProfileId
+        }).catch((err) => console.error(err));
+      }, [activeProfileId]);
+
+      const activeModpack = useMemo(
+        () => modpacks.find((pack) => pack.id === activeModpackId) || null,
+        [modpacks, activeModpackId]
+      );
+
+      const handleRamInput = (value) => {
+        setRam(value);
+      };
+
+      const commitRamValue = () => {
+        const numeric = Number(ram);
+        if (!Number.isFinite(numeric)) {
+          setRam(defaults.ramMb);
+          return;
+        }
+        const clamped = clamp(Math.round(numeric), defaults.minRamMb || 1024, 65536);
+        setRam(clamped);
+      };
+
+      const handleSyncMods = async () => {
+        try {
+          setSyncing(true);
+          setStatus('Синхронизация модов…');
+          const res = await window.launcher.syncMods();
+          if (res.ok) {
+            setStatus(`Моды синхронизированы. Скопировано: ${res.copied || 0}.`);
+          } else {
+            setStatus('Ошибка синхронизации: ' + res.error);
+          }
+        } catch (err) {
+          setStatus('Ошибка синхронизации: ' + err.message);
+        } finally {
+          setSyncing(false);
+        }
+      };
+
+      const handleOpenMods = async () => {
+        try {
+          await window.launcher.openModsFolder(activeModpackId);
+          setStatus('Папка с модами открыта в проводнике.');
+        } catch (err) {
+          setStatus('Не удалось открыть папку: ' + err.message);
+        }
+      };
+
+      const handleLaunch = async () => {
+        try {
+          setLaunching(true);
+          setStatus('Запуск Minecraft…');
+          const res = await window.launcher.launch({
+            username: nickname,
+            ramMb: Number(ram)
+          });
+          if (res.ok) {
+            setStatus('Minecraft запущен. Переключитесь к окну игры.');
+          } else {
+            setStatus('Ошибка запуска: ' + res.error);
+          }
+        } catch (err) {
+          setStatus('Ошибка запуска: ' + err.message);
+        } finally {
+          setLaunching(false);
+        }
+      };
+
+      const handleAddProfile = async () => {
+        const baseNickname = nickname.trim() || 'Player';
+        const label = `${baseNickname} #${profiles.length + 1}`;
+        try {
+          const settings = await window.launcher.saveProfile({
+            label,
+            nickname,
+            ramMb: Number(ram)
+          });
+          applySettings(settings);
+          setStatus(`Профиль «${label}» сохранён. Используйте список слева для переключения.`);
+        } catch (err) {
+          setStatus('Не удалось сохранить профиль: ' + err.message);
+        }
+      };
+
+      const handleProfileSelect = async (profile) => {
+        try {
+          const settings = await window.launcher.activateProfile(profile.id);
+          applySettings(settings);
+          setStatus(`Профиль «${profile.label}» активирован.`);
+        } catch (err) {
+          setStatus('Не удалось переключить профиль: ' + err.message);
+        }
+      };
+
+      const handleProfileDelete = async (profile) => {
+        const confirmed = window.confirm(`Удалить профиль «${profile.label}»?`);
+        if (!confirmed) return;
+        try {
+          const settings = await window.launcher.deleteProfile(profile.id);
+          applySettings(settings);
+          setStatus(`Профиль «${profile.label}» удалён.`);
+        } catch (err) {
+          setStatus('Не удалось удалить профиль: ' + err.message);
+        }
+      };
+
+      const handleModpackSelect = async (modpack) => {
+        if (!modpack || modpack.id === activeModpackId) return;
+        try {
+          setStatus(`Переключение на модпак «${modpack.name}»…`);
+          const result = await window.launcher.selectModpack(modpack.id);
+          setActiveModpackId(result.activeModpackId);
+          setPaths(result.paths || {});
+          if (result.settings) {
+            applySettings(result.settings);
+          }
+          setStatus(`Активирован модпак «${modpack.name}».`);
+        } catch (err) {
+          setStatus('Не удалось переключить модпак: ' + err.message);
+        }
+      };
+
+      const progressPercent = progress && progress.task && progress.task.total
+        ? Math.round((progress.task.progress / progress.task.total) * 100)
+        : 0;
 
       return (
-        <div className="wrap">
-          <h1>Custom Launcher 1.12.2 (Forge)</h1>
-          <div className="card">
-            <label>Ник</label>
-            <input value={nick} onChange={e=>setNick(e.target.value)} />
-
-            <label>RAM (MB)</label>
-            <input type="number" value={ram} onChange={e=>setRam(e.target.value)} min="1024" step="256" />
-
-            <div className="row">
-              <button onClick={syncMods}>Синхронизировать моды</button>
-              <button className="primary" onClick={launch}>Запустить</button>
+        <div className="app-shell">
+          {!bootstrapped && (
+            <div className="loading-overlay">
+              <div className="spinner" />
+              <p>Загружаем конфигурацию…</p>
             </div>
-            {progress && (
-              <div className="progress">
-                <div className="bar" style={{width: (progress.task && progress.task.total ? (progress.task.progress/progress.task.total*100) : 0) + '%'}}></div>
-              </div>
-            )}
-            <div className="status">{status}</div>
-          </div>
+          )}
 
-          <div className="log">
-            <pre>{logs.join('\n')}</pre>
-          </div>
+          <aside className="sidebar">
+            <div className="brand">
+              <span className="brand-accent">Custom</span>
+              <span>Launcher</span>
+            </div>
+            <div className="sidebar-section">
+              <div className="sidebar-header">
+                <h2>Модпаки</h2>
+              </div>
+              <div className="modpack-grid">
+                {modpacks.map((pack) => (
+                  <button
+                    key={pack.id}
+                    className={`modpack-tile${pack.id === activeModpackId ? ' active' : ''}`}
+                    onClick={() => handleModpackSelect(pack)}
+                  >
+                    {pack.icon ? (
+                      <img src={pack.icon} alt={pack.name} />
+                    ) : (
+                      <div className="modpack-placeholder">
+                        {pack.name.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="modpack-meta">
+                      <div className="title">{pack.name}</div>
+                      <div className="subtitle">{pack.description || 'Без описания'}</div>
+                    </div>
+                  </button>
+                ))}
+                {!modpacks.length && (
+                  <div className="empty-state">Модпаки не определены в конфигурации.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <div className="sidebar-header">
+                <h2>Профили</h2>
+                <button className="icon-button" onClick={handleAddProfile} title="Добавить профиль">
+                  +
+                </button>
+              </div>
+              <div className="profile-list">
+                {profiles.map((profile) => (
+                  <div
+                    key={profile.id}
+                    className={`profile-card${profile.id === activeProfileId ? ' active' : ''}`}
+                  >
+                    <button className="profile-main" onClick={() => handleProfileSelect(profile)}>
+                      <div className="profile-title">{profile.label}</div>
+                      <div className="profile-subtitle">
+                        {profile.nickname} · {profile.ramMb} MB
+                      </div>
+                    </button>
+                    <button
+                      className="icon-button danger"
+                      onClick={() => handleProfileDelete(profile)}
+                      title="Удалить профиль"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {!profiles.length && (
+                  <div className="empty-state small">
+                    Нажмите «+», чтобы сохранить текущие ник и объём RAM как профиль быстрого запуска.
+                  </div>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          <main className="main-area">
+            <header className="main-header">
+              <div>
+                <h1>{activeModpack ? activeModpack.name : 'Minecraft Launcher'}</h1>
+                <p className="subtitle">
+                  {activeModpack ? activeModpack.description || 'Forge 1.12.2' : 'Forge 1.12.2'}
+                </p>
+              </div>
+              <div className="header-actions">
+                <button onClick={handleSyncMods} disabled={syncing}>
+                  {syncing ? 'Синхронизация…' : 'Синхронизировать моды'}
+                </button>
+                <button onClick={handleOpenMods}>Открыть папку модов</button>
+              </div>
+            </header>
+
+            <section className="card control-card">
+              <div className="field-grid">
+                <label>
+                  Ник
+                  <input
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    maxLength={32}
+                    placeholder="Player"
+                  />
+                </label>
+                <label>
+                  RAM (MB)
+                  <input
+                    type="number"
+                    value={ram}
+                    min={defaults.minRamMb || 1024}
+                    max={65536}
+                    step="256"
+                    onChange={(e) => handleRamInput(e.target.value)}
+                    onBlur={commitRamValue}
+                  />
+                  <span className="hint">
+                    Минимум {defaults.minRamMb || 1024} MB. Рекомендуется {Math.max(defaults.ramMb, defaults.minRamMb)} MB+.
+                  </span>
+                </label>
+              </div>
+
+              <div className="actions-row">
+                <button
+                  className="primary"
+                  onClick={handleLaunch}
+                  disabled={launching}
+                >
+                  {launching ? 'Запуск…' : 'Запустить игру'}
+                </button>
+                <div className="status-line">{status}</div>
+              </div>
+
+              {progress && progressPercent > 0 && (
+                <div className="progress">
+                  <div className="progress-bar" style={{ width: `${progressPercent}%` }} />
+                  <span className="progress-text">
+                    {progressPercent}% · {progress.type || 'загрузка'}
+                  </span>
+                </div>
+              )}
+
+              <div className="paths">
+                <div>
+                  <span className="paths-label">Game Root:</span>
+                  <code>{paths.gameRoot || '—'}</code>
+                </div>
+                <div>
+                  <span className="paths-label">Mods:</span>
+                  <code>{paths.modsDir || '—'}</code>
+                </div>
+              </div>
+            </section>
+
+            <section className="card logs-card">
+              <div className="logs-header">
+                <h2>Логи запуска</h2>
+                <button className="icon-button" onClick={() => setLogs([])} title="Очистить логи">
+                  очистить
+                </button>
+              </div>
+              <div className="log-output" ref={logsRef}>
+                <pre>{logs.join('\n')}</pre>
+              </div>
+            </section>
+          </main>
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>

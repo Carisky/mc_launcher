@@ -1,12 +1,26 @@
-﻿{
-  "GAME_ROOT": "./runtime", 
+{
+  "GAME_ROOT": "./runtime",
   "FORGE_VERSION": "1.12.2-forge-14.23.5.2860",
-  "JAVA_ARGS": ["-Xmx2G", "-Xms1G"],
-  "GITHUB": {
-    "OWNER": "your-github",
-    "REPO": "your-modpack-repo",
-    "BRANCH": "main",
-    "SUBDIR": "mods" 
-  },
+  "DEFAULT_RAM_MB": 8192,
+  "MIN_RAM_MB": 4096,
+  "JAVA_ARGS": [
+    "-XX:-UseAdaptiveSizePolicy",
+    "-XX:-OmitStackTraceInFastThrow"
+  ],
+  "MODPACKS": [
+    {
+      "id": "dtm",
+      "name": "DTM Modpack",
+      "description": "Основная сборка DTM. Forge 1.12.2, синхронизация из GitHub.",
+      "icon": "https://raw.githubusercontent.com/github/explore/main/topics/minecraft/minecraft.png",
+      "forgeVersion": "1.12.2-forge-14.23.5.2860",
+      "github": {
+        "OWNER": "Carisky",
+        "REPO": "minecraft_1_12_2_mods_dtm",
+        "BRANCH": "main",
+        "SUBDIR": ""
+      }
+    }
+  ],
   "DELETE_EXTRA_MODS": true
 }
