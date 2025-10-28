@@ -1,409 +1,804 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*; connect-src 'self' https://codeload.github.com;" />
-  <title>Custom MC Launcher</title>
-  <link rel="stylesheet" href="./style.css" />
-</head>
-<body>
-  <div id="root"></div>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*; connect-src 'self' https://codeload.github.com;"
+    />
+    <title>Custom MC Launcher</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    <script type="text/babel">
+      const { useState, useEffect, useMemo, useRef } = React;
 
-    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-    function App() {
-      const [bootstrapped, setBootstrapped] = useState(false);
-      const [modpacks, setModpacks] = useState([]);
-      const [activeModpackId, setActiveModpackId] = useState(null);
-      const [paths, setPaths] = useState({});
-      const [nickname, setNickname] = useState('Player');
-      const [ram, setRam] = useState(2048);
-      const [status, setStatus] = useState('Загрузка…');
-      const [logs, setLogs] = useState([]);
-      const [progress, setProgress] = useState(null);
-      const [profiles, setProfiles] = useState([]);
-      const [activeProfileId, setActiveProfileId] = useState(null);
-      const [defaults, setDefaults] = useState({ ramMb: 2048, minRamMb: 1024 });
-      const [syncing, setSyncing] = useState(false);
-      const [launching, setLaunching] = useState(false);
-      const logsRef = useRef(null);
-      const readyRef = useRef(false);
-      const skipSettingsSync = useRef(false);
+      const PROFILE_GRADIENTS = [
+        "linear-gradient(135deg, #22d3ee 0%, #6366f1 100%)",
+        "linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%)",
+        "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
+        "linear-gradient(135deg, #34d399 0%, #10b981 100%)",
+        "linear-gradient(135deg, #38bdf8 0%, #818cf8 100%)",
+        "linear-gradient(135deg, #f472b6 0%, #6366f1 100%)",
+      ];
 
-      const applySettings = (nextSettings) => {
-        skipSettingsSync.current = true;
-        setNickname(nextSettings.nickname || 'Player');
-        setRam(nextSettings.ramMb || defaults.ramMb);
-        setProfiles(nextSettings.profiles || []);
-        setActiveProfileId(nextSettings.activeProfileId || null);
+      const PROFILE_GLYPHS = ["🧙", "🛡️", "🐉", "🌌", "🧊", "🦊"];
+
+      const sumCharCodes = (value) =>
+        (value || "")
+          .split("")
+          .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+      const getProfileVisuals = (profile = {}, index = 0) => {
+        const seed =
+          sumCharCodes(profile.id || profile.label || profile.nickname) + index;
+        const gradient = PROFILE_GRADIENTS[seed % PROFILE_GRADIENTS.length];
+        const glyph = PROFILE_GLYPHS[seed % PROFILE_GLYPHS.length];
+        const base =
+          (profile.nickname || profile.label || "Игрок").trim() || "Игрок";
+        const initial = base.slice(0, 1).toUpperCase();
+        return { gradient, glyph, initial };
       };
 
-      useEffect(() => {
-        (async () => {
-          try {
-            const bootstrap = await window.launcher.bootstrap();
-            setModpacks(bootstrap.modpacks || []);
-            setActiveModpackId(bootstrap.activeModpackId || null);
-            setPaths(bootstrap.paths || {});
-            setDefaults(bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 });
-            applySettings(bootstrap.settings || {});
-            setStatus('Готово.');
-            setBootstrapped(true);
-            readyRef.current = true;
-          } catch (err) {
-            console.error(err);
-            setStatus('Ошибка инициализации: ' + err.message);
+      const getTimeGreeting = () => {
+        const hour = new Date().getHours();
+        if (hour < 5) return "Доброй ночи";
+        if (hour < 12) return "Доброе утро";
+        if (hour < 18) return "Добрый день";
+        return "Добрый вечер";
+      };
+
+      function App() {
+        const [bootstrapped, setBootstrapped] = useState(false);
+        const [modpacks, setModpacks] = useState([]);
+        const [activeModpackId, setActiveModpackId] = useState(null);
+        const [paths, setPaths] = useState({});
+        const [nickname, setNickname] = useState("Player");
+        const [ram, setRam] = useState(2048);
+        const [status, setStatus] = useState("Загрузка…");
+        const [logs, setLogs] = useState([]);
+        const [progress, setProgress] = useState(null);
+        const [profiles, setProfiles] = useState([]);
+        const [activeProfileId, setActiveProfileId] = useState(null);
+        const [defaults, setDefaults] = useState({
+          ramMb: 2048,
+          minRamMb: 1024,
+        });
+        const [syncing, setSyncing] = useState(false);
+        const [launching, setLaunching] = useState(false);
+        const [profileModalOpen, setProfileModalOpen] = useState(false);
+        const [profileModalLabel, setProfileModalLabel] = useState("");
+        const [profileModalNickname, setProfileModalNickname] = useState("");
+        const [profileModalRam, setProfileModalRam] = useState("");
+        const [profileModalSaving, setProfileModalSaving] = useState(false);
+        const [profileModalError, setProfileModalError] = useState("");
+        const profileModalLabelRef = useRef(null);
+        const logsRef = useRef(null);
+        const readyRef = useRef(false);
+        const skipSettingsSync = useRef(false);
+
+        useEffect(() => {
+          if (profileModalOpen && profileModalLabelRef.current) {
+            profileModalLabelRef.current.focus();
           }
-        })();
-      }, []);
+        }, [profileModalOpen]);
 
-      useEffect(() => {
-        window.launcher.onLog((msg) => {
-          setLogs((prev) => {
-            const next = [...prev, msg];
-            return next.slice(-500);
+        const applySettings = (
+          nextSettings,
+          opts = { preserveNickname: false }
+        ) => {
+          skipSettingsSync.current = true;
+          if (!opts.preserveNickname) {
+            setNickname(nextSettings.nickname ?? "Player");
+          }
+          setRam(nextSettings.ramMb ?? defaults.ramMb);
+          const nextProfiles = nextSettings.profiles ?? [];
+          setProfiles(nextProfiles);
+          const potentialActive = nextSettings.activeProfileId ?? null;
+          const hasActive =
+            potentialActive !== null &&
+            nextProfiles.some((profile) => profile.id === potentialActive);
+          if (hasActive) {
+            setActiveProfileId(potentialActive);
+          } else {
+            setActiveProfileId(nextProfiles[0]?.id ?? null);
+          }
+        };
+
+        useEffect(() => {
+          (async () => {
+            try {
+              const bootstrap = await window.launcher.bootstrap();
+              setModpacks(bootstrap.modpacks || []);
+              setActiveModpackId(bootstrap.activeModpackId || null);
+              setPaths(bootstrap.paths || {});
+              setDefaults(
+                bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 }
+              );
+              applySettings(bootstrap.settings || {});
+              setStatus("Лаунчер готов! Выбирайте сборку или профиль.");
+              setBootstrapped(true);
+              readyRef.current = true;
+            } catch (err) {
+              console.error(err);
+              setStatus("Ошибка инициализации: " + err.message);
+            }
+          })();
+        }, []);
+
+        useEffect(() => {
+          window.launcher.onLog((msg) => {
+            setLogs((prev) => {
+              const next = [...prev, msg];
+              return next.slice(-500);
+            });
           });
-        });
-        window.launcher.onProgress((payload) => {
-          setProgress(payload);
-        });
-      }, []);
+          window.launcher.onProgress((payload) => {
+            setProgress(payload);
+          });
+        }, []);
 
-      useEffect(() => {
-        if (logsRef.current) {
-          logsRef.current.scrollTop = logsRef.current.scrollHeight;
-        }
-      }, [logs]);
+        useEffect(() => {
+          if (logsRef.current) {
+            logsRef.current.scrollTop = logsRef.current.scrollHeight;
+          }
+        }, [logs]);
 
-      useEffect(() => {
-        if (!readyRef.current) return;
-        if (skipSettingsSync.current) {
-          skipSettingsSync.current = false;
-          return;
-        }
-        const handle = setTimeout(() => {
-          window.launcher.updateSettings({
-            nickname,
-            ramMb: Number(ram)
-          }).catch((err) => console.error(err));
-        }, 400);
-        return () => clearTimeout(handle);
-      }, [nickname, ram]);
+        useEffect(() => {
+          if (!readyRef.current) return;
+          if (skipSettingsSync.current) {
+            skipSettingsSync.current = false;
+            return;
+          }
+          const handle = setTimeout(() => {
+            window.launcher
+              .updateSettings({
+                nickname,
+                ramMb: Number(ram),
+              })
+              .catch((err) => console.error(err));
+          }, 400);
+          return () => clearTimeout(handle);
+        }, [nickname, ram]);
 
-      useEffect(() => {
-        if (!readyRef.current) return;
-        if (skipSettingsSync.current) {
-          skipSettingsSync.current = false;
-          return;
-        }
-        window.launcher.updateSettings({
-          activeProfileId
-        }).catch((err) => console.error(err));
-      }, [activeProfileId]);
+        useEffect(() => {
+          if (!readyRef.current) return;
+          if (skipSettingsSync.current) {
+            skipSettingsSync.current = false;
+            return;
+          }
+          window.launcher
+            .updateSettings({
+              activeProfileId,
+            })
+            .catch((err) => console.error(err));
+        }, [activeProfileId]);
+
+        useEffect(() => {
+          if (!activeProfileId) return;
+          setProfiles((prev) =>
+            prev.map((p) => (p.id === activeProfileId ? { ...p, nickname } : p))
+          );
+        }, [nickname, activeProfileId]);
 
       const activeModpack = useMemo(
         () => modpacks.find((pack) => pack.id === activeModpackId) || null,
         [modpacks, activeModpackId]
       );
 
-      const handleRamInput = (value) => {
-        setRam(value);
-      };
-
-      const commitRamValue = () => {
-        const numeric = Number(ram);
-        if (!Number.isFinite(numeric)) {
-          setRam(defaults.ramMb);
+      useEffect(() => {
+        if (!profiles.length) {
+          if (activeProfileId !== null) setActiveProfileId(null);
           return;
         }
-        const clamped = clamp(Math.round(numeric), defaults.minRamMb || 1024, 65536);
-        setRam(clamped);
-      };
+        if (!activeProfileId) {
+          setActiveProfileId(profiles[0].id);
+          return;
+        }
+        if (!profiles.some((profile) => profile.id === activeProfileId)) {
+          setActiveProfileId(profiles[0].id);
+        }
+      }, [profiles, activeProfileId]);
 
-      const handleSyncMods = async () => {
-        try {
-          setSyncing(true);
-          setStatus('Синхронизация модов…');
-          const res = await window.launcher.syncMods();
-          if (res.ok) {
-            setStatus(`Моды синхронизированы. Скопировано: ${res.copied || 0}.`);
-          } else {
-            setStatus('Ошибка синхронизации: ' + res.error);
+      const activeProfile = useMemo(
+        () => profiles.find((profile) => profile.id === activeProfileId) || null,
+        [profiles, activeProfileId]
+      );
+
+        const greeting = useMemo(() => getTimeGreeting(), []);
+        const editorKey = useMemo(
+          () =>
+            `${activeProfileId ?? "none"}-${profiles
+              .map((p) => p.id)
+              .join("|")}`,
+          [activeProfileId, profiles]
+        );
+        const bannerSubtitle = useMemo(() => {
+          if (activeModpack) {
+            return `Готовы к приключениям в сборке "${activeModpack.name}"? Мы уже все подготовили.`;
           }
-        } catch (err) {
-          setStatus('Ошибка синхронизации: ' + err.message);
-        } finally {
-          setSyncing(false);
-        }
-      };
-
-      const handleOpenMods = async () => {
-        try {
-          await window.launcher.openModsFolder(activeModpackId);
-          setStatus('Папка с модами открыта в проводнике.');
-        } catch (err) {
-          setStatus('Не удалось открыть папку: ' + err.message);
-        }
-      };
-
-      const handleLaunch = async () => {
-        try {
-          setLaunching(true);
-          setStatus('Запуск Minecraft…');
-          const res = await window.launcher.launch({
-            username: nickname,
-            ramMb: Number(ram)
-          });
-          if (res.ok) {
-            setStatus('Minecraft запущен. Переключитесь к окну игры.');
-          } else {
-            setStatus('Ошибка запуска: ' + res.error);
+          if (modpacks.length) {
+            return `Выберите одну из ${modpacks.length} готовых сборок или синхронизируйте новые.`;
           }
-        } catch (err) {
-          setStatus('Ошибка запуска: ' + err.message);
-        } finally {
-          setLaunching(false);
-        }
-      };
+          return "Нажмите «Синхронизировать моды», чтобы загрузить первую сборку.";
+        }, [activeModpack, modpacks.length]);
 
-      const handleAddProfile = async () => {
-        const baseNickname = nickname.trim() || 'Player';
-        const label = `${baseNickname} #${profiles.length + 1}`;
-        try {
-          const settings = await window.launcher.saveProfile({
-            label,
-            nickname,
-            ramMb: Number(ram)
-          });
-          applySettings(settings);
-          setStatus(`Профиль «${label}» сохранён. Используйте список слева для переключения.`);
-        } catch (err) {
-          setStatus('Не удалось сохранить профиль: ' + err.message);
-        }
-      };
+        const profileSummary = useMemo(() => {
+          const label = activeProfile?.label || "Черновой профиль";
+          return `Профиль "${label}" · Память ${ram} МБ · Ник ${nickname}`;
+        }, [activeProfile, ram, nickname]);
 
-      const handleProfileSelect = async (profile) => {
-        try {
-          const settings = await window.launcher.activateProfile(profile.id);
-          applySettings(settings);
-          setStatus(`Профиль «${profile.label}» активирован.`);
-        } catch (err) {
-          setStatus('Не удалось переключить профиль: ' + err.message);
-        }
-      };
+        const bannerVisuals = useMemo(() => {
+          const baseProfile = activeProfile || {
+            id: "virtual-active",
+            label: "Черновой профиль",
+            nickname: nickname || "Игрок",
+          };
+          return getProfileVisuals(baseProfile);
+        }, [activeProfile, nickname]);
 
-      const handleProfileDelete = async (profile) => {
-        const confirmed = window.confirm(`Удалить профиль «${profile.label}»?`);
-        if (!confirmed) return;
-        try {
-          const settings = await window.launcher.deleteProfile(profile.id);
-          applySettings(settings);
-          setStatus(`Профиль «${profile.label}» удалён.`);
-        } catch (err) {
-          setStatus('Не удалось удалить профиль: ' + err.message);
-        }
-      };
+        const handleRamInput = (value) => {
+          setRam(value);
+        };
 
-      const handleModpackSelect = async (modpack) => {
-        if (!modpack || modpack.id === activeModpackId) return;
-        try {
-          setStatus(`Переключение на модпак «${modpack.name}»…`);
-          const result = await window.launcher.selectModpack(modpack.id);
-          setActiveModpackId(result.activeModpackId);
-          setPaths(result.paths || {});
-          if (result.settings) {
-            applySettings(result.settings);
+        const commitRamValue = () => {
+          const numeric = Number(ram);
+          if (!Number.isFinite(numeric)) {
+            setRam(defaults.ramMb);
+            return;
           }
-          setStatus(`Активирован модпак «${modpack.name}».`);
-        } catch (err) {
-          setStatus('Не удалось переключить модпак: ' + err.message);
-        }
-      };
+          const clamped = clamp(
+            Math.round(numeric),
+            defaults.minRamMb || 1024,
+            65536
+          );
+          setRam(clamped);
+        };
 
-      const progressPercent = progress && progress.task && progress.task.total
-        ? Math.round((progress.task.progress / progress.task.total) * 100)
-        : 0;
+        const openProfileModal = () => {
 
-      return (
-        <div className="app-shell">
-          {!bootstrapped && (
-            <div className="loading-overlay">
-              <div className="spinner" />
-              <p>Загружаем конфигурацию…</p>
-            </div>
-          )}
+          const baseNickname = (activeProfile?.nickname || nickname || "Player").trim() || "Player";
 
-          <aside className="sidebar">
-            <div className="brand">
-              <span className="brand-accent">Custom</span>
-              <span>Launcher</span>
-            </div>
-            <div className="sidebar-section">
-              <div className="sidebar-header">
-                <h2>Модпаки</h2>
+          const labelSuggestion = `${baseNickname} #${profiles.length + 1}`;
+
+          const ramSuggestion = clamp(
+
+            Number(ram) || defaults.ramMb || 2048,
+
+            defaults.minRamMb || 1024,
+
+            65536
+
+          );
+
+          setProfileModalLabel(labelSuggestion);
+
+          setProfileModalNickname(baseNickname);
+
+          setProfileModalRam(String(ramSuggestion));
+
+          setProfileModalError("");
+
+          setProfileModalOpen(true);
+
+        };
+
+
+
+        const closeProfileModal = () => {
+
+          if (profileModalSaving) return;
+
+          setProfileModalOpen(false);
+
+        };
+
+
+
+        const handleProfileModalSubmit = async (event) => {
+          if (event) {
+            event.preventDefault();
+          }
+          if (profileModalSaving) return;
+
+          const cleanNickname = profileModalNickname.trim() || "Player";
+          const cleanLabel =
+            profileModalLabel.trim() ||
+            `${cleanNickname} #${profiles.length + 1}`;
+          const numericRam = clamp(
+            Math.round(Number(profileModalRam) || defaults.ramMb || 2048),
+            defaults.minRamMb || 1024,
+            65536
+          );
+
+          setProfileModalNickname(cleanNickname);
+          setProfileModalLabel(cleanLabel);
+          setProfileModalRam(String(numericRam));
+
+          try {
+            setProfileModalSaving(true);
+            setProfileModalError("");
+            const settings = await window.launcher.saveProfile({
+              label: cleanLabel,
+              nickname: cleanNickname,
+              ramMb: numericRam,
+            });
+            applySettings(settings);
+            setStatus(
+              `Профиль "${cleanLabel}" сохранен. Можно переключаться в списке слева.`
+            );
+            setProfileModalOpen(false);
+          } catch (err) {
+            setProfileModalError(err.message);
+          } finally {
+            setProfileModalSaving(false);
+          }
+        };
+
+        const handleProfileModalRamChange = (value) => {
+
+          setProfileModalRam(value);
+
+        };
+
+
+
+        const handleSyncMods = async () => {
+          try {
+            setSyncing(true);
+            setStatus("Синхронизируем моды...");
+            const res = await window.launcher.syncMods();
+            if (res.ok) {
+              setStatus(`Готово! Скопировано файлов: ${res.copied || 0}.`);
+            } else {
+              setStatus("Не удалось синхронизировать моды: " + res.error);
+            }
+          } catch (err) {
+            setStatus("Не удалось синхронизировать моды: " + err.message);
+          } finally {
+            setSyncing(false);
+          }
+        };
+
+        const handleOpenMods = async () => {
+          try {
+            await window.launcher.openModsFolder(activeModpackId);
+            setStatus("Открываем папку с модами. Настраивайте игру под себя!");
+          } catch (err) {
+            setStatus("Не удалось открыть папку модов: " + err.message);
+          }
+        };
+
+        const handleLaunch = async () => {
+          try {
+            setLaunching(true);
+            setStatus("Запускаем Minecraft...");
+            const res = await window.launcher.launch({
+              username: nickname,
+              ramMb: Number(ram),
+            });
+            if (res.ok) {
+              setStatus("Minecraft запущен. Приятной игры!");
+            } else {
+              setStatus("Не получилось запустить игру: " + res.error);
+            }
+          } catch (err) {
+            setStatus("Не получилось запустить игру: " + err.message);
+          } finally {
+            setLaunching(false);
+          }
+        };
+
+        const handleAddProfile = () => {
+
+          openProfileModal();
+
+        };
+
+
+
+        const handleProfileSelect = async (profile) => {
+          try {
+            // сначала локально переключаемся
+            setActiveProfileId(profile.id);
+            setNickname(profile.nickname || "Player");
+            setRam(profile.ramMb ?? defaults.ramMb);
+
+            // потом уведомляем бэк, но НЕ применяем его settings
+            await window.launcher.activateProfile(profile.id);
+
+            setStatus(`Профиль "${profile.label}" активирован.`);
+          } catch (err) {
+            setStatus("Не удалось активировать профиль: " + err.message);
+          }
+        };
+
+        const handleProfileDelete = async (profile) => {
+          const confirmed = window.confirm(
+            `Удалить профиль "${profile.label}"?`
+          );
+          if (!confirmed) return;
+
+          try {
+            const wasActive = profile.id === activeProfileId;
+            await window.launcher.deleteProfile(profile.id);
+
+            // локально правим состояние, НЕ трогаем nickname/ram
+            setProfiles((prev) => prev.filter((p) => p.id !== profile.id));
+            if (wasActive) setActiveProfileId(null);
+
+            setStatus(`Профиль "${profile.label}" удален.`);
+          } catch (err) {
+            setStatus("Не удалось удалить профиль: " + err.message);
+          }
+        };
+
+        const handleModpackSelect = async (modpack) => {
+          if (!modpack || modpack.id === activeModpackId) return;
+          try {
+            setStatus(`Переключаемся на сборку "${modpack.name}"...`);
+            const result = await window.launcher.selectModpack(modpack.id);
+            setActiveModpackId(result.activeModpackId);
+            setPaths(result.paths || {});
+            if (result.settings) {
+              applySettings(result.settings);
+            }
+            setStatus(`Сборка "${modpack.name}" готова.`);
+          } catch (err) {
+            setStatus("Не удалось активировать сборку: " + err.message);
+          }
+        };
+
+        const progressPercent =
+          progress && progress.task && progress.task.total
+            ? Math.round((progress.task.progress / progress.task.total) * 100)
+            : 0;
+
+        return (
+          <div className="app-shell">
+            {!bootstrapped && (
+              <div className="loading-overlay">
+                <div className="spinner" />
+                <p>Готовим лаунчер…</p>
               </div>
-              <div className="modpack-grid">
-                {modpacks.map((pack) => (
-                  <button
-                    key={pack.id}
-                    className={`modpack-tile${pack.id === activeModpackId ? ' active' : ''}`}
-                    onClick={() => handleModpackSelect(pack)}
-                  >
-                    {pack.icon ? (
-                      <img src={pack.icon} alt={pack.name} />
-                    ) : (
-                      <div className="modpack-placeholder">
-                        {pack.name.slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="modpack-meta">
-                      <div className="title">{pack.name}</div>
-                      <div className="subtitle">{pack.description || 'Без описания'}</div>
+            )}
+
+            <aside className="sidebar">
+              <div className="brand">
+                <span className="brand-accent">Custom</span>
+                <span>Launcher</span>
+                <span className="brand-sub">Minecraft Edition</span>
+              </div>
+              <div className="sidebar-section highlight">
+                <div className="sidebar-header">
+                  <h2>Сборки</h2>
+                </div>
+                <div className="modpack-grid">
+                  {modpacks.map((pack) => {
+                    const isActive = pack.id === activeModpackId;
+                    return (
+                      <button
+                        key={pack.id}
+                        className={`modpack-tile${isActive ? " active" : ""}`}
+                        onClick={() => handleModpackSelect(pack)}
+                      >
+                        {pack.icon ? (
+                          <img src={pack.icon} alt={pack.name} />
+                        ) : (
+                          <div className="modpack-placeholder">
+                            <span>{pack.name.slice(0, 1).toUpperCase()}</span>
+                          </div>
+                        )}
+                        <div className="modpack-meta">
+                          <div className="title">{pack.name}</div>
+                          <div className="subtitle">
+                            {pack.description || "Описание появится позже"}
+                          </div>
+                        </div>
+                        <span className="modpack-pill" aria-hidden="true" />
+                      </button>
+                    );
+                  })}
+                  {!modpacks.length && (
+                    <div className="empty-state">
+                      Сборок пока нет. Нажмите «Синхронизировать моды», чтобы
+                      загрузить первую.
                     </div>
-                  </button>
-                ))}
-                {!modpacks.length && (
-                  <div className="empty-state">Модпаки не определены в конфигурации.</div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className="sidebar-section">
-              <div className="sidebar-header">
-                <h2>Профили</h2>
-                <button className="icon-button" onClick={handleAddProfile} title="Добавить профиль">
-                  +
-                </button>
-              </div>
-              <div className="profile-list">
-                {profiles.map((profile) => (
-                  <div
-                    key={profile.id}
-                    className={`profile-card${profile.id === activeProfileId ? ' active' : ''}`}
+              <div className="sidebar-section">
+                <div className="sidebar-header">
+                  <h2>Профили</h2>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={handleAddProfile}
+                    title="Сохранить новый профиль"
                   >
-                    <button className="profile-main" onClick={() => handleProfileSelect(profile)}>
-                      <div className="profile-title">{profile.label}</div>
-                      <div className="profile-subtitle">
-                        {profile.nickname} · {profile.ramMb} MB
+                    +
+                  </button>
+                </div>
+                <div className="profile-list">
+                  {profiles.map((profile, index) => {
+                    const visuals = getProfileVisuals(profile, index);
+                    return (
+                      <div
+                        key={profile.id}
+                        className={`profile-card${
+                          profile.id === activeProfileId ? " active" : ""
+                        }`}
+                      >
+                        <button
+                          className="profile-main"
+                          onClick={() => handleProfileSelect(profile)}
+                        >
+                          <div
+                            className="profile-avatar"
+                            style={{ background: visuals.gradient }}
+                          >
+                            <span
+                              className="profile-avatar-icon"
+                              aria-hidden="true"
+                            >
+                              {visuals.glyph || visuals.initial}
+                            </span>
+                          </div>
+                          <div className="profile-meta">
+                            <div className="profile-title">{profile.label}</div>
+                            <div className="profile-subtitle">
+                              {profile.nickname} · {profile.ramMb} МБ
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          className="icon-button danger"
+                          type="button"
+                          onClick={() => handleProfileDelete(profile)}
+                          title="Удалить профиль"
+                          aria-label={`Удалить профиль ${profile.label}`}
+                        >
+                          ×
+                        </button>
                       </div>
+                    );
+                  })}
+                  {!profiles.length && (
+                    <div className="empty-state small">
+                      Здесь появятся ваши сохраненные профили. Сохраните текущие
+                      настройки, чтобы собрать коллекцию.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </aside>
+
+            <main className="main-area">
+              <section className="user-banner">
+                <div
+                  className="user-banner-avatar"
+                  style={{ background: bannerVisuals.gradient }}
+                >
+                  <span className="user-banner-icon" aria-hidden="true">
+                    {bannerVisuals.glyph || bannerVisuals.initial}
+                  </span>
+                </div>
+                <div className="user-banner-content">
+                  <p className="user-greeting">
+                    {greeting}, {nickname || "Игрок"}!
+                  </p>
+                  <div className="user-banner-footer">
+                    <span>{profileSummary}</span>
+                    <button className="ghost-button" onClick={handleAddProfile}>
+                      Сохранить текущий профиль
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <header className="main-header">
+                <div>
+                  <h1>
+                    {activeModpack ? activeModpack.name : "Minecraft Launcher"}
+                  </h1>
+                  <p className="subtitle">
+                    {activeModpack
+                      ? activeModpack.description || "Forge 1.12.2"
+                      : "Forge 1.12.2"}
+                  </p>
+                </div>
+                <div className="header-actions">
+                  <button
+                    className="action-button accent"
+                    onClick={handleSyncMods}
+                    disabled={syncing}
+                  >
+                    <span aria-hidden="true">🔄</span>
+                    {syncing ? "Синхронизируем..." : "Синхронизировать моды"}
+                  </button>
+                  <button className="action-button" onClick={handleOpenMods}>
+                    <span aria-hidden="true">📂</span>
+                    Открыть папку модов
+                  </button>
+                </div>
+              </header>
+
+              <section className="card control-card">
+                <div className="field-grid">
+                  <label>
+                    Никнейм
+                    <input
+                      key={`nick-${editorKey}`}
+                      value={nickname}
+                      onChange={(e) => setNickname(e.target.value)}
+                      maxLength={32}
+                      placeholder="Player"
+                    />
+                  </label>
+
+                  <label>
+                    RAM (MB)
+                    <input
+                      key={`ram-${editorKey}`}
+                      type="number"
+                      value={ram}
+                      min={defaults.minRamMb || 1024}
+                      max={65536}
+                      step="256"
+                      onChange={(e) => handleRamInput(e.target.value)}
+                      onBlur={commitRamValue}
+                    />
+                    <span className="hint">
+                      Минимум {defaults.minRamMb || 1024} МБ. Комфортно играть
+                      на {Math.max(defaults.ramMb, defaults.minRamMb)} МБ и
+                      выше.
+                    </span>
+                  </label>
+                </div>
+
+                <div className="actions-row">
+                  <button
+                    className="primary"
+                    onClick={handleLaunch}
+                    disabled={launching}
+                  >
+                    {launching ? "Запускаем…" : "Играть сейчас"}
+                  </button>
+                  <div className="status-line">{status}</div>
+                </div>
+
+                {progress && progressPercent > 0 && (
+                  <div className="progress">
+                    <div
+                      className="progress-bar"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                    <span className="progress-text">
+                      {progressPercent}% ·{" "}
+                      {progress.type || "подготовка файлов"}
+                    </span>
+                  </div>
+                )}
+
+                <div className="paths">
+                  <div>
+                    <span className="paths-label">Папка игры:</span>
+                    <code>{paths.gameRoot || "—"}</code>
+                  </div>
+                  <div>
+                    <span className="paths-label">Папка модов:</span>
+                    <code>{paths.modsDir || "—"}</code>
+                  </div>
+                </div>
+              </section>
+
+              <section className="card logs-card">
+                <div className="logs-header">
+                  <h2>Логи запуска</h2>
+                  <button
+                    className="ghost-button small"
+                    type="button"
+                    onClick={() => setLogs([])}
+                    title="Очистить логи"
+                  >
+                    Очистить
+                  </button>
+                </div>
+                <div className="log-output" ref={logsRef}>
+                  <pre>{logs.join("\n")}</pre>
+                </div>
+              </section>
+            </main>
+
+          {profileModalOpen && (
+            <div className="modal-backdrop" role="presentation" onClick={closeProfileModal}>
+              <div
+                className="modal-card"
+                role="dialog"
+                aria-modal="true"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <header className="modal-header">
+                  <h2>Создать профиль</h2>
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={closeProfileModal}
+                    aria-label="Закрыть диалог"
+                    disabled={profileModalSaving}
+                  >
+                    ×
+                  </button>
+                </header>
+                <form className="modal-body" onSubmit={handleProfileModalSubmit}>
+                  <label className="modal-field">
+                    Название профиля
+                    <input
+                      ref={profileModalLabelRef}
+                      value={profileModalLabel}
+                      onChange={(event) => setProfileModalLabel(event.target.value)}
+                      maxLength={48}
+                      placeholder="Например, Adventure Pack"
+                    />
+                  </label>
+                  <label className="modal-field">
+                    Никнейм
+                    <input
+                      value={profileModalNickname}
+                      onChange={(event) => setProfileModalNickname(event.target.value)}
+                      maxLength={32}
+                      placeholder="Player"
+                    />
+                  </label>
+                  <label className="modal-field">
+                    RAM (MB)
+                    <input
+                      type="number"
+                      value={profileModalRam}
+                      min={defaults.minRamMb || 1024}
+                      max={65536}
+                      step="256"
+                      onChange={(event) =>
+                        handleProfileModalRamChange(event.target.value)
+                      }
+                    />
+                  </label>
+                  {profileModalError && (
+                    <div className="modal-error">{profileModalError}</div>
+                  )}
+                  <footer className="modal-actions">
+                    <button
+                      type="button"
+                      className="ghost-button"
+                      onClick={closeProfileModal}
+                      disabled={profileModalSaving}
+                    >
+                      Отмена
                     </button>
                     <button
-                      className="icon-button danger"
-                      onClick={() => handleProfileDelete(profile)}
-                      title="Удалить профиль"
+                      type="submit"
+                      className="primary"
+                      disabled={profileModalSaving}
                     >
-                      ×
+                      {profileModalSaving ? "Сохраняем…" : "Сохранить"}
                     </button>
-                  </div>
-                ))}
-                {!profiles.length && (
-                  <div className="empty-state small">
-                    Нажмите «+», чтобы сохранить текущие ник и объём RAM как профиль быстрого запуска.
-                  </div>
-                )}
+                  </footer>
+                </form>
               </div>
             </div>
-          </aside>
-
-          <main className="main-area">
-            <header className="main-header">
-              <div>
-                <h1>{activeModpack ? activeModpack.name : 'Minecraft Launcher'}</h1>
-                <p className="subtitle">
-                  {activeModpack ? activeModpack.description || 'Forge 1.12.2' : 'Forge 1.12.2'}
-                </p>
-              </div>
-              <div className="header-actions">
-                <button onClick={handleSyncMods} disabled={syncing}>
-                  {syncing ? 'Синхронизация…' : 'Синхронизировать моды'}
-                </button>
-                <button onClick={handleOpenMods}>Открыть папку модов</button>
-              </div>
-            </header>
-
-            <section className="card control-card">
-              <div className="field-grid">
-                <label>
-                  Ник
-                  <input
-                    value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
-                    maxLength={32}
-                    placeholder="Player"
-                  />
-                </label>
-                <label>
-                  RAM (MB)
-                  <input
-                    type="number"
-                    value={ram}
-                    min={defaults.minRamMb || 1024}
-                    max={65536}
-                    step="256"
-                    onChange={(e) => handleRamInput(e.target.value)}
-                    onBlur={commitRamValue}
-                  />
-                  <span className="hint">
-                    Минимум {defaults.minRamMb || 1024} MB. Рекомендуется {Math.max(defaults.ramMb, defaults.minRamMb)} MB+.
-                  </span>
-                </label>
-              </div>
-
-              <div className="actions-row">
-                <button
-                  className="primary"
-                  onClick={handleLaunch}
-                  disabled={launching}
-                >
-                  {launching ? 'Запуск…' : 'Запустить игру'}
-                </button>
-                <div className="status-line">{status}</div>
-              </div>
-
-              {progress && progressPercent > 0 && (
-                <div className="progress">
-                  <div className="progress-bar" style={{ width: `${progressPercent}%` }} />
-                  <span className="progress-text">
-                    {progressPercent}% · {progress.type || 'загрузка'}
-                  </span>
-                </div>
-              )}
-
-              <div className="paths">
-                <div>
-                  <span className="paths-label">Game Root:</span>
-                  <code>{paths.gameRoot || '—'}</code>
-                </div>
-                <div>
-                  <span className="paths-label">Mods:</span>
-                  <code>{paths.modsDir || '—'}</code>
-                </div>
-              </div>
-            </section>
-
-            <section className="card logs-card">
-              <div className="logs-header">
-                <h2>Логи запуска</h2>
-                <button className="icon-button" onClick={() => setLogs([])} title="Очистить логи">
-                  очистить
-                </button>
-              </div>
-              <div className="log-output" ref={logsRef}>
-                <pre>{logs.join('\n')}</pre>
-              </div>
-            </section>
-          </main>
+          )}
         </div>
-      );
-    }
+        );
+      }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-  </script>
-</body>
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
 </html>
