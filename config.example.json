@@ -64,5 +64,14 @@
       }
     }
   ],
+  "MCLC_OVERRIDES": {
+    "url": {
+      "meta": "https://bmclapi2.bangbang93.com",
+      "resource": "https://bmclapi2.bangbang93.com/assets",
+      "mavenForge": "https://bmclapi2.bangbang93.com/forge/",
+      "defaultRepoForge": "https://bmclapi2.bangbang93.com/maven/",
+      "fallbackMaven": "https://bmclapi2.bangbang93.com/maven/"
+    }
+  },
   "DELETE_EXTRA_MODS": true
 }

@@ -17,6 +17,203 @@ const CONFIG_PATH = path.join(__dirname, 'config.json');
 const configRaw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
 const config = JSON.parse(configRaw);
 
+const cloneJson = (value) => {
+  if (!value || typeof value !== 'object') return null;
+  return JSON.parse(JSON.stringify(value));
+};
+
+const rawMclcOverrides = cloneJson(config.MCLC_OVERRIDES);
+
+const trimTrailingSlashes = (value) => value.replace(/\/+$/, '');
+const ensureSingleTrailingSlash = (value) => `${trimTrailingSlashes(value)}/`;
+
+const sanitizeUrlOverrides = (urls = {}) => {
+  if (!urls || typeof urls !== 'object') return null;
+  const sanitized = {};
+  if (typeof urls.meta === 'string') {
+    sanitized.meta = trimTrailingSlashes(urls.meta.trim());
+  }
+  if (typeof urls.resource === 'string') {
+    sanitized.resource = trimTrailingSlashes(urls.resource.trim());
+  }
+  if (typeof urls.mavenForge === 'string') {
+    sanitized.mavenForge = ensureSingleTrailingSlash(urls.mavenForge.trim());
+  }
+  if (typeof urls.defaultRepoForge === 'string') {
+    sanitized.defaultRepoForge = ensureSingleTrailingSlash(urls.defaultRepoForge.trim());
+  }
+  if (typeof urls.fallbackMaven === 'string') {
+    sanitized.fallbackMaven = ensureSingleTrailingSlash(urls.fallbackMaven.trim());
+  }
+  if (typeof urls.resourceBase === 'string') {
+    sanitized.resourceBase = trimTrailingSlashes(urls.resourceBase.trim());
+  }
+  return Object.keys(sanitized).length ? sanitized : null;
+};
+
+const buildMclcOverrides = () => {
+  if (!rawMclcOverrides) return null;
+  const overrides = cloneJson(rawMclcOverrides) || {};
+  if (overrides.url) {
+    const sanitizedUrl = sanitizeUrlOverrides(overrides.url);
+    if (sanitizedUrl) {
+      overrides.url = sanitizedUrl;
+    } else {
+      delete overrides.url;
+    }
+  }
+  return Object.keys(overrides).length ? overrides : null;
+};
+
+const extractUrlPath = (value) => {
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = new URL(value);
+    return `${parsed.pathname}${parsed.search || ''}`;
+  } catch (err) {
+    return null;
+  }
+};
+
+const replaceUrlBase = (url, base) => {
+  if (typeof url !== 'string' || typeof base !== 'string') return url;
+  const pathPart = extractUrlPath(url);
+  if (!pathPart) return url;
+  const normalizedBase = trimTrailingSlashes(base.trim());
+  if (!normalizedBase) return url;
+  return `${normalizedBase}${pathPart}`;
+};
+
+const rewriteUrlForMirror = (url, overrides) => {
+  if (typeof url !== 'string' || !overrides || !overrides.url) return url;
+  const target = url.trim();
+  if (!target) return target;
+
+  const { meta, resource, mavenForge, defaultRepoForge, fallbackMaven } = overrides.url;
+  const metaBase = meta ? trimTrailingSlashes(meta) : null;
+  const resourceBase = resource ? trimTrailingSlashes(resource) : null;
+  const mavenBase = mavenForge ? trimTrailingSlashes(mavenForge) : null;
+  const defaultBase = defaultRepoForge ? trimTrailingSlashes(defaultRepoForge) : null;
+  const fallbackBase = fallbackMaven ? trimTrailingSlashes(fallbackMaven) : null;
+
+  if (metaBase && /^(https?:\/\/)?(launchermeta|piston-meta|piston-data|launcher)\.mojang\.com/i.test(target)) {
+    return replaceUrlBase(target, metaBase);
+  }
+  if (resourceBase && /^(https?:\/\/)?resources\.download\.minecraft\.net/i.test(target)) {
+    return replaceUrlBase(target, resourceBase);
+  }
+  if (mavenBase && /^(https?:\/\/)?(files|maven)\.minecraftforge\.net/i.test(target)) {
+    return replaceUrlBase(target, mavenBase);
+  }
+  if (defaultBase && /^(https?:\/\/)?libraries\.minecraft\.net/i.test(target)) {
+    return replaceUrlBase(target, defaultBase);
+  }
+  if (fallbackBase && /^(https?:\/\/)?search\.maven\.org/i.test(target)) {
+    return replaceUrlBase(target, fallbackBase);
+  }
+  return target;
+};
+
+const rewriteVersionJsonForMirror = (payload, overrides) => {
+  if (!payload || typeof payload !== 'object' || !overrides || !overrides.url) return payload;
+  const cloned = JSON.parse(JSON.stringify(payload));
+
+  if (cloned.assetIndex && cloned.assetIndex.url) {
+    cloned.assetIndex.url = rewriteUrlForMirror(cloned.assetIndex.url, overrides);
+  }
+
+  if (cloned.downloads) {
+    if (cloned.downloads.client && cloned.downloads.client.url) {
+      cloned.downloads.client.url = rewriteUrlForMirror(cloned.downloads.client.url, overrides);
+    }
+    if (cloned.downloads.server && cloned.downloads.server.url) {
+      cloned.downloads.server.url = rewriteUrlForMirror(cloned.downloads.server.url, overrides);
+    }
+  }
+
+  if (cloned.logging && cloned.logging.client && cloned.logging.client.file && cloned.logging.client.file.url) {
+    cloned.logging.client.file.url = rewriteUrlForMirror(cloned.logging.client.file.url, overrides);
+  }
+
+  if (Array.isArray(cloned.libraries)) {
+    for (const lib of cloned.libraries) {
+      if (!lib || typeof lib !== 'object') continue;
+      if (lib.url) {
+        lib.url = rewriteUrlForMirror(lib.url, overrides);
+      }
+      if (lib.downloads && lib.downloads.artifact && lib.downloads.artifact.url) {
+        lib.downloads.artifact.url = rewriteUrlForMirror(lib.downloads.artifact.url, overrides);
+      }
+      if (lib.downloads && lib.downloads.classifiers && typeof lib.downloads.classifiers === 'object') {
+        for (const classifier of Object.values(lib.downloads.classifiers)) {
+          if (classifier && classifier.url) {
+            classifier.url = rewriteUrlForMirror(classifier.url, overrides);
+          }
+        }
+      }
+    }
+  }
+
+  return cloned;
+};
+
+const fetchJsonFromMirror = async (url, label) => {
+  let res;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    throw new Error(`Failed to fetch ${label}: ${err.message || err}`);
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${label}: ${res.status} ${res.statusText}`);
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    throw new Error(`Failed to parse ${label}: ${err.message || err}`);
+  }
+};
+
+const ensureVersionMetadataForMirror = async (gameRoot, versionNumber, overrides) => {
+  if (!gameRoot || !versionNumber || !overrides || !overrides.url || !overrides.url.meta) return null;
+
+  const versionDir = path.join(gameRoot, 'versions', versionNumber);
+  const versionJsonPath = path.join(versionDir, `${versionNumber}.json`);
+
+  if (await fs.pathExists(versionJsonPath)) {
+    try {
+      const existing = await fs.readJson(versionJsonPath);
+      const rewritten = rewriteVersionJsonForMirror(existing, overrides);
+      if (JSON.stringify(existing) !== JSON.stringify(rewritten)) {
+        await fs.ensureDir(versionDir);
+        await fs.writeJson(versionJsonPath, rewritten, { spaces: 2 });
+      }
+      return versionJsonPath;
+    } catch (err) {
+      console.warn(`[mclc] Failed to reuse version metadata at ${versionJsonPath}:`, err);
+    }
+  }
+
+  const metaBase = trimTrailingSlashes(overrides.url.meta);
+  const manifestUrl = `${metaBase}/mc/game/version_manifest.json`;
+  const manifest = await fetchJsonFromMirror(manifestUrl, 'Minecraft version manifest');
+  const entry = Array.isArray(manifest?.versions)
+    ? manifest.versions.find((item) => item && String(item.id) === String(versionNumber))
+    : null;
+
+  if (!entry || !entry.url) {
+    throw new Error(`Version "${versionNumber}" is missing in manifest from ${manifestUrl}`);
+  }
+
+  const versionUrl = replaceUrlBase(entry.url, metaBase);
+  const versionJson = await fetchJsonFromMirror(versionUrl, `Minecraft version ${versionNumber} metadata`);
+  const rewrittenJson = rewriteVersionJsonForMirror(versionJson, overrides);
+
+  await fs.ensureDir(versionDir);
+  await fs.writeJson(versionJsonPath, rewrittenJson, { spaces: 2 });
+  return versionJsonPath;
+};
+
 const DEFAULT_RELATIVE_ROOT = config.GAME_ROOT && !path.isAbsolute(config.GAME_ROOT)
   ? config.GAME_ROOT
   : 'runtime';
@@ -1576,10 +1773,17 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       authorization.user_properties = formatUserPropertiesJson(latest.user?.properties);
     }
 
+    const baseVersion = deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION);
+    const customOverrides = buildMclcOverrides();
+    let versionJsonPath = null;
+    if (customOverrides?.url?.meta) {
+      versionJsonPath = await ensureVersionMetadataForMirror(activePaths.gameRoot, baseVersion, customOverrides);
+    }
+
     const opts = {
       authorization,
       root: activePaths.gameRoot,
-      version: { number: deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION), type: 'release' },
+      version: { number: baseVersion, type: 'release' },
       forge: forgeInstaller,
       memory: {
         max: `${ramMb}`,
@@ -1588,6 +1792,25 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       javaPath: undefined,
       customArgs: javaArgs
     };
+
+    if (customOverrides || versionJsonPath) {
+      const overridesForLaunch = {};
+      if (versionJsonPath) {
+        overridesForLaunch.versionJson = versionJsonPath;
+      }
+      if (customOverrides) {
+        for (const [key, value] of Object.entries(customOverrides)) {
+          if (key === 'url' && value && typeof value === 'object') {
+            overridesForLaunch.url = { ...(overridesForLaunch.url || {}), ...value };
+          } else if (key === 'fw' && value && typeof value === 'object') {
+            overridesForLaunch.fw = { ...(overridesForLaunch.fw || {}), ...value };
+          } else {
+            overridesForLaunch[key] = value;
+          }
+        }
+      }
+      opts.overrides = overridesForLaunch;
+    }
 
     launcher.on('debug', (log) => event.sender.send('mc:log', String(log)));
     launcher.on('data', (log) => event.sender.send('mc:log', String(log)));
