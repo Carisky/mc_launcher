@@ -221,6 +221,122 @@ body {
   z-index: 1;
 }
 
+.auth-section .sidebar-header h2 {
+  font-size: 18px;
+  color: #dbeafe;
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(13, 18, 34, 0.78);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+.auth-card.authenticated {
+  border-color: rgba(96, 165, 250, 0.45);
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.88), rgba(30, 64, 175, 0.52));
+}
+
+.auth-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.auth-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.auth-base {
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.8);
+  word-break: break-all;
+}
+
+.auth-disabled {
+  font-size: 12px;
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-form.registration {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(99, 102, 241, 0.18);
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #cbd5f5;
+}
+
+.auth-form input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(129, 140, 248, 0.32);
+  background: rgba(11, 15, 28, 0.85);
+  color: #f8fafc;
+  font-size: 13px;
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-form input:focus {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.75);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auth-actions .primary {
+  flex: 1;
+}
+
+.auth-card .ghost-button.danger {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.auth-card .ghost-button.danger:hover {
+  border-color: rgba(248, 113, 113, 0.6);
+  color: #fecaca;
+}
+
+.auth-error {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  color: #fecaca;
+  font-size: 12px;
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;

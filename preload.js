@@ -4,6 +4,11 @@ const invoke = (channel, payload) => ipcRenderer.invoke(channel, payload);
 
 contextBridge.exposeInMainWorld('launcher', {
   bootstrap: () => invoke('app:bootstrap'),
+  authStatus: () => invoke('auth:status'),
+  authLogin: (payload) => invoke('auth:login', payload),
+  authRegister: (payload) => invoke('auth:register', payload),
+  authLogout: () => invoke('auth:logout'),
+  authRefresh: () => invoke('auth:refresh'),
   updateSettings: (payload) => invoke('settings:update', payload),
   saveProfile: (payload) => invoke('profiles:save', payload),
   deleteProfile: (profileId) => invoke('profiles:delete', profileId),

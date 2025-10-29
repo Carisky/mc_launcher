@@ -3,7 +3,9 @@ const path = require('path');
 const fs = require('fs-extra');
 const fetch = require('node-fetch');
 const extract = require('extract-zip');
+const crypto = require('crypto');
 const os = require('os');
+const { pipeline } = require('stream/promises');
 const { Client } = require('minecraft-launcher-core');
 const { Rcon } = require('rcon-client');
 const nbt = require('prismarine-nbt');
@@ -103,6 +105,44 @@ const toBoolean = (value, fallback = false) => {
   return Boolean(value);
 };
 
+const normalizeBaseUrl = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/+$/, '');
+};
+
+const rawAuthConfig = config.AUTH;
+const authConfig = (() => {
+  if (!rawAuthConfig) return null;
+  const baseUrl = normalizeBaseUrl(rawAuthConfig.baseUrl);
+  if (!baseUrl) return null;
+  const provider = rawAuthConfig.provider || 'authlib-injector';
+  const allowRegistration = toBoolean(rawAuthConfig.allowRegistration, false);
+  const domain = typeof rawAuthConfig.domain === 'string' ? rawAuthConfig.domain.trim() || null : null;
+  const injectorRaw = rawAuthConfig.authlibInjector || {};
+  const downloadUrl = typeof injectorRaw.downloadUrl === 'string' ? injectorRaw.downloadUrl.trim() || null : null;
+  const version = injectorRaw.version ? String(injectorRaw.version) : null;
+  const sha256 = typeof injectorRaw.sha256 === 'string' ? injectorRaw.sha256.trim() || null : null;
+
+  return {
+    provider,
+    baseUrl,
+    allowRegistration,
+    domain,
+    authlibInjector: downloadUrl ? { downloadUrl, version, sha256 } : null
+  };
+})();
+
+const authEndpoints = authConfig ? {
+  baseUrl: authConfig.baseUrl,
+  authServer: `${authConfig.baseUrl}/auth`,
+  accountServer: `${authConfig.baseUrl}/account`,
+  sessionServer: `${authConfig.baseUrl}/session`,
+  servicesServer: `${authConfig.baseUrl}/services`,
+  injectorMeta: `${authConfig.baseUrl}/authlib-injector/meta`
+} : null;
+
 const resolveRefreshIntervalMs = (entry = {}) => {
   const directMs = toPositiveInteger(entry.refreshIntervalMs || entry.refreshMs);
   if (directMs) return Math.max(MIN_REFRESH_INTERVAL_MS, directMs);
@@ -120,6 +160,83 @@ const resolveRefreshIntervalMs = (entry = {}) => {
 };
 
 const displayServerAddress = (server) => (server.port ? `${server.address}:${server.port}` : server.address);
+
+const createClientToken = () => crypto.randomBytes(16).toString('hex');
+
+const sanitizeProfile = (profile) => {
+  if (!profile || typeof profile !== 'object') return null;
+  const id = profile.id || profile.uuid || profile.playerId || profile.playerUUID;
+  const name = profile.name || profile.playerName || profile.displayName;
+  if (!id || !name) return null;
+  return { id: String(id), name: String(name) };
+};
+
+const sanitizePropertiesArray = (properties) => {
+  if (!Array.isArray(properties)) return [];
+  return properties
+    .filter(prop => prop && prop.name !== undefined && prop.name !== null)
+    .map(prop => ({
+      name: String(prop.name),
+      value: prop.value !== undefined && prop.value !== null ? String(prop.value) : ''
+    }));
+};
+
+const normalizeAuthSnapshot = (raw = {}, overrides = {}) => {
+  const fallbackProvider = overrides.provider !== undefined
+    ? overrides.provider
+    : (authConfig ? authConfig.provider : null);
+  const fallbackBaseUrl = overrides.baseUrl !== undefined
+    ? overrides.baseUrl
+    : (authConfig ? authConfig.baseUrl : null);
+  const fallbackAllowRegistration = overrides.allowRegistration !== undefined
+    ? overrides.allowRegistration
+    : (authConfig ? authConfig.allowRegistration : false);
+
+  const clientToken = typeof raw.clientToken === 'string' && raw.clientToken.trim()
+    ? raw.clientToken.trim()
+    : createClientToken();
+
+  const selectedProfile = sanitizeProfile(raw.selectedProfile || raw.profile || raw.selected_profile);
+  const availableProfilesRaw = raw.availableProfiles || raw.available_profiles || [];
+  const availableProfiles = Array.isArray(availableProfilesRaw)
+    ? availableProfilesRaw.map(sanitizeProfile).filter(Boolean)
+    : [];
+
+  const dedupedProfiles = [];
+  const seenProfileIds = new Set();
+  if (selectedProfile && selectedProfile.id) {
+    dedupedProfiles.push(selectedProfile);
+    seenProfileIds.add(selectedProfile.id);
+  }
+  for (const profile of availableProfiles) {
+    if (profile && profile.id && !seenProfileIds.has(profile.id)) {
+      dedupedProfiles.push(profile);
+      seenProfileIds.add(profile.id);
+    }
+  }
+
+  const normalizedBaseUrl = normalizeBaseUrl(raw.baseUrl || raw.serverBaseUrl || fallbackBaseUrl);
+
+  return {
+    provider: raw.provider || fallbackProvider,
+    baseUrl: normalizedBaseUrl,
+    allowRegistration: raw.allowRegistration !== undefined
+      ? toBoolean(raw.allowRegistration, fallbackAllowRegistration)
+      : fallbackAllowRegistration,
+    clientToken,
+    accessToken: typeof raw.accessToken === 'string' && raw.accessToken.trim() ? raw.accessToken.trim() : null,
+    refreshToken: typeof raw.refreshToken === 'string' && raw.refreshToken.trim() ? raw.refreshToken.trim() : null,
+    selectedProfile,
+    availableProfiles: dedupedProfiles,
+    user: raw.user ? {
+      ...raw.user,
+      properties: sanitizePropertiesArray(raw.user.properties)
+    } : null,
+    minecraftToken: typeof raw.minecraftToken === 'string' && raw.minecraftToken.trim() ? raw.minecraftToken.trim() : null,
+    lastAuthAt: typeof raw.lastAuthAt === 'number' && Number.isFinite(raw.lastAuthAt) ? raw.lastAuthAt : null,
+    tokenExpiresAt: typeof raw.tokenExpiresAt === 'number' && Number.isFinite(raw.tokenExpiresAt) ? raw.tokenExpiresAt : null
+  };
+};
 
 const normalizeCommand = (value, fallback) => {
   if (typeof value !== 'string') return fallback;
@@ -329,7 +446,12 @@ const normalizeSettings = (settings = {}) => {
     ramMb: Number(settings.ramMb) || DEFAULT_RAM,
     activeProfileId: settings.activeProfileId || null,
     profiles: Array.isArray(settings.profiles) ? settings.profiles : [],
-    selectedModpack: settings.selectedModpack || config.ACTIVE_MODPACK || modpacks[0].id
+    selectedModpack: settings.selectedModpack || config.ACTIVE_MODPACK || modpacks[0].id,
+    auth: normalizeAuthSnapshot(settings.auth || {}, {
+      provider: authConfig ? authConfig.provider : undefined,
+      baseUrl: authConfig ? authConfig.baseUrl : undefined,
+      allowRegistration: authConfig ? authConfig.allowRegistration : undefined
+    })
   };
 
   sanitized.ramMb = Math.max(DEFAULT_MIN_RAM, Math.min(65536, sanitized.ramMb));
@@ -363,10 +485,183 @@ const loadUserSettings = () => {
 
 let userSettings = loadUserSettings();
 
+const ensureAuthState = () => {
+  const previous = userSettings.auth || {};
+  const prevBaseUrl = previous.baseUrl || null;
+  let normalized = normalizeAuthSnapshot(previous, {
+    provider: authConfig ? authConfig.provider : undefined,
+    baseUrl: authConfig ? authConfig.baseUrl : undefined,
+    allowRegistration: authConfig ? authConfig.allowRegistration : undefined
+  });
+
+  if (authConfig) {
+    const baseChanged = prevBaseUrl && prevBaseUrl !== authConfig.baseUrl;
+    normalized.provider = authConfig.provider || normalized.provider || 'authlib-injector';
+    normalized.allowRegistration = authConfig.allowRegistration;
+    normalized.baseUrl = authConfig.baseUrl;
+    if (baseChanged) {
+      normalized = {
+        ...normalized,
+        accessToken: null,
+        refreshToken: null,
+        selectedProfile: null,
+        availableProfiles: [],
+        user: null,
+        minecraftToken: null,
+        lastAuthAt: null,
+        tokenExpiresAt: null
+      };
+    }
+  }
+
+  userSettings.auth = normalized;
+  return userSettings.auth;
+};
+
+const formatUserPropertiesJson = (properties) => {
+  if (!Array.isArray(properties) || !properties.length) return '{}';
+  const aggregated = {};
+  for (const entry of properties) {
+    if (!entry || !entry.name) continue;
+    const key = String(entry.name);
+    const val = entry.value !== undefined && entry.value !== null ? String(entry.value) : '';
+    if (!aggregated[key]) {
+      aggregated[key] = [val];
+    } else {
+      aggregated[key].push(val);
+    }
+  }
+  return JSON.stringify(aggregated);
+};
+
+const serializeAuthState = () => {
+  const state = ensureAuthState();
+  const primaryProfile = state.selectedProfile || state.availableProfiles[0] || null;
+  const status = authConfig
+    ? (state.accessToken && primaryProfile ? 'authenticated' : 'unauthenticated')
+    : 'disabled';
+
+  const minimalUser = state.user ? {
+    id: state.user.id || null,
+    username: state.user.username || null,
+    isAdmin: typeof state.user.isAdmin === 'boolean' ? state.user.isAdmin : undefined,
+    maxPlayerCount: state.user.maxPlayerCount !== undefined ? state.user.maxPlayerCount : undefined
+  } : null;
+
+  return {
+    provider: state.provider,
+    baseUrl: state.baseUrl,
+    domain: authConfig ? authConfig.domain : null,
+    allowRegistration: state.allowRegistration,
+    status,
+    hasSession: Boolean(state.accessToken && primaryProfile),
+    selectedProfile: primaryProfile,
+    availableProfiles: state.availableProfiles,
+    user: minimalUser,
+    lastAuthAt: state.lastAuthAt,
+    tokenExpiresAt: state.tokenExpiresAt
+  };
+};
+
+const applyAuthResponse = async (authResponse = {}, extras = {}) => {
+  if (!authResponse) return serializeAuthState();
+  const state = ensureAuthState();
+
+  const selectedProfile = sanitizeProfile(
+    authResponse.selectedProfile ||
+    authResponse.selected_profile ||
+    authResponse.profile
+  );
+  const availableProfilesRaw = authResponse.availableProfiles || authResponse.available_profiles;
+  const availableProfiles = Array.isArray(availableProfilesRaw)
+    ? availableProfilesRaw.map(sanitizeProfile).filter(Boolean)
+    : [];
+
+  const dedupedProfiles = [];
+  const seen = new Set();
+  if (selectedProfile && selectedProfile.id) {
+    dedupedProfiles.push(selectedProfile);
+    seen.add(selectedProfile.id);
+  }
+  for (const profile of availableProfiles) {
+    if (profile && profile.id && !seen.has(profile.id)) {
+      dedupedProfiles.push(profile);
+      seen.add(profile.id);
+    }
+  }
+
+  state.clientToken = authResponse.clientToken || authResponse.client_token || state.clientToken || createClientToken();
+  state.accessToken = authResponse.accessToken || authResponse.access_token || state.accessToken;
+  state.refreshToken = authResponse.refreshToken || authResponse.refresh_token || null;
+  state.selectedProfile = selectedProfile || state.selectedProfile || null;
+  const profilesList = dedupedProfiles.length ? dedupedProfiles : state.availableProfiles;
+  state.availableProfiles = profilesList;
+  if (!state.selectedProfile && profilesList.length) {
+    state.selectedProfile = profilesList[0];
+  }
+  state.user = authResponse.user ? {
+    ...authResponse.user,
+    properties: sanitizePropertiesArray(authResponse.user.properties)
+  } : state.user;
+  state.minecraftToken = authResponse.minecraftToken || authResponse.minecraft_token || state.minecraftToken || null;
+  state.lastAuthAt = Date.now();
+
+  if (authResponse.expiresIn) {
+    const expiresInMs = Number(authResponse.expiresIn) * 1000;
+    state.tokenExpiresAt = Number.isFinite(expiresInMs) ? Date.now() + expiresInMs : null;
+  } else if (authResponse.expiresAt) {
+    const parsed = Date.parse(authResponse.expiresAt);
+    state.tokenExpiresAt = Number.isFinite(parsed) ? parsed : null;
+  } else {
+    state.tokenExpiresAt = state.tokenExpiresAt || null;
+  }
+
+  if (extras.baseUrl) {
+    state.baseUrl = normalizeBaseUrl(extras.baseUrl) || state.baseUrl;
+  }
+  if (extras.provider) {
+    state.provider = extras.provider;
+  }
+  if (typeof extras.allowRegistration === 'boolean') {
+    state.allowRegistration = extras.allowRegistration;
+  }
+
+  if (state.selectedProfile && state.selectedProfile.name) {
+    userSettings.nickname = state.selectedProfile.name;
+  }
+
+  await persistUserSettings();
+  return serializeAuthState();
+};
+
+const clearAuthState = async () => {
+  const state = ensureAuthState();
+  state.accessToken = null;
+  state.refreshToken = null;
+  state.selectedProfile = null;
+  state.availableProfiles = [];
+  state.user = null;
+  state.minecraftToken = null;
+  state.lastAuthAt = null;
+  state.tokenExpiresAt = null;
+  await persistUserSettings();
+  return serializeAuthState();
+};
+
 const persistUserSettings = async () => {
+  ensureAuthState();
   await fs.ensureDir(path.dirname(USER_SETTINGS_PATH));
   await fs.writeJson(USER_SETTINGS_PATH, userSettings, { spaces: 2 });
 };
+
+const getClientToken = () => {
+  const state = ensureAuthState();
+  if (state.clientToken) return state.clientToken;
+  state.clientToken = createClientToken();
+  return state.clientToken;
+};
+
+let cachedAuthlibInjectorPath = null;
 
 const getModpackById = (id) => modpacks.find(mp => mp.id === id) || modpacks[0];
 
@@ -471,7 +766,12 @@ const openProfile = async (profileId) => {
   return userSettings;
 };
 
-const serializeSettings = () => JSON.parse(JSON.stringify(userSettings));
+const serializeSettings = () => {
+  const { auth, ...rest } = userSettings;
+  const safe = JSON.parse(JSON.stringify(rest));
+  safe.auth = serializeAuthState();
+  return safe;
+};
 const serializeModpacks = () => modpacks.map(mp => ({
   id: mp.id,
   name: mp.name,
@@ -822,8 +1122,232 @@ const ensureForgeInstaller = async (forgeVersion) => {
   return installerPath;
 };
 
+const currentAuthExtras = () => authConfig ? {
+  provider: authConfig.provider,
+  baseUrl: authConfig.baseUrl,
+  allowRegistration: authConfig.allowRegistration
+} : {};
+
+const ensureAuthlibInjector = async () => {
+  if (!authConfig || !authConfig.authlibInjector) return null;
+  if (cachedAuthlibInjectorPath && await fs.pathExists(cachedAuthlibInjectorPath)) {
+    return cachedAuthlibInjectorPath;
+  }
+
+  const { downloadUrl, version, sha256 } = authConfig.authlibInjector;
+  if (!downloadUrl) return null;
+
+  const jarDir = path.join(BASE_GAME_ROOT, 'authlib-injector');
+  let jarName = 'authlib-injector.jar';
+  try {
+    const parsed = new URL(downloadUrl);
+    const base = path.basename(parsed.pathname);
+    if (base) {
+      jarName = base;
+    } else if (version) {
+      jarName = `authlib-injector-${version}.jar`;
+    }
+  } catch (err) {
+    if (version) {
+      jarName = `authlib-injector-${version}.jar`;
+    }
+  }
+  const jarPath = path.join(jarDir, jarName);
+
+  const downloadIfNeeded = async () => {
+    await fs.ensureDir(jarDir);
+    const tempPath = path.join(jarDir, `.tmp-${Date.now()}-${jarName}`);
+    let stream = null;
+    try {
+      const res = await fetch(downloadUrl);
+      if (!res.ok || !res.body) {
+        throw new Error(`Failed to download authlib-injector (${res.status} ${res.statusText})`);
+      }
+      stream = fs.createWriteStream(tempPath);
+      await pipeline(res.body, stream);
+      if (sha256) {
+        const computed = await new Promise((resolve, reject) => {
+          const hash = crypto.createHash('sha256');
+          const input = fs.createReadStream(tempPath);
+          input.on('data', (chunk) => hash.update(chunk));
+          input.on('error', reject);
+          input.on('end', () => resolve(hash.digest('hex').toUpperCase()));
+        });
+        if (computed !== sha256.toUpperCase()) {
+          throw new Error(`authlib-injector checksum mismatch (expected ${sha256}, got ${computed})`);
+        }
+      }
+      await fs.move(tempPath, jarPath, { overwrite: true });
+    } catch (err) {
+      if (stream) {
+        stream.close();
+      }
+      if (await fs.pathExists(tempPath)) {
+        await fs.remove(tempPath);
+      }
+      throw err;
+    }
+  };
+
+  if (!(await fs.pathExists(jarPath))) {
+    await downloadIfNeeded();
+  }
+
+  cachedAuthlibInjectorPath = jarPath;
+  return jarPath;
+};
+
+const parseJsonResponse = async (res) => {
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+
+const performAuthRequest = async (endpoint, payload) => {
+  if (!authEndpoints) {
+    throw new Error('Authentication server is not configured.');
+  }
+  const url = `${authEndpoints.authServer}${endpoint}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {})
+    });
+  } catch (err) {
+    err.message = `Failed to reach authentication server: ${err.message}`;
+    throw err;
+  }
+
+  if (res.status === 204) {
+    return null;
+  }
+
+  const data = await parseJsonResponse(res);
+  if (!res.ok) {
+    const message = data?.errorMessage || data?.error || `Authentication request failed (${res.status})`;
+    const error = new Error(message);
+    error.status = res.status;
+    error.code = data?.error || null;
+    error.body = data;
+    throw error;
+  }
+  return data;
+};
+
+const performDraslRequest = async (pathSuffix, payload, options = {}) => {
+  if (!authEndpoints) {
+    throw new Error('Authentication server is not configured.');
+  }
+  const url = `${authEndpoints.baseUrl}${pathSuffix}`;
+  const method = options.method || 'POST';
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.token ? { Authorization: `Bearer ${options.token}` } : {})
+  };
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: payload !== undefined ? JSON.stringify(payload) : undefined
+    });
+  } catch (err) {
+    err.message = `Failed to reach Drasl API: ${err.message}`;
+    throw err;
+  }
+
+  const data = await parseJsonResponse(res);
+  if (!res.ok) {
+    const message = data?.errorMessage || data?.error || `Drasl API request failed (${res.status})`;
+    const error = new Error(message);
+    error.status = res.status;
+    error.code = data?.error || null;
+    error.body = data;
+    throw error;
+  }
+  return data;
+};
+
+const authenticateWithPassword = async (username, password) => {
+  if (!authEndpoints) {
+    throw new Error('Authentication server is not configured.');
+  }
+  const sanitizedUsername = String(username || '').trim();
+  if (!sanitizedUsername || typeof password !== 'string' || !password.length) {
+    throw new Error('Username and password are required.');
+  }
+  const clientToken = getClientToken();
+  const body = {
+    agent: { name: 'Minecraft', version: 1 },
+    username: sanitizedUsername,
+    password,
+    clientToken,
+    requestUser: true
+  };
+  const response = await performAuthRequest('/authenticate', body);
+  return applyAuthResponse(response, currentAuthExtras());
+};
+
+const refreshAuthSession = async () => {
+  const state = ensureAuthState();
+  if (!state.accessToken) {
+    throw new Error('No active session to refresh.');
+  }
+  const body = {
+    accessToken: state.accessToken,
+    clientToken: state.clientToken || getClientToken(),
+    requestUser: true
+  };
+  const response = await performAuthRequest('/refresh', body);
+  return applyAuthResponse(response, currentAuthExtras());
+};
+
+const invalidateAuthSession = async () => {
+  const state = ensureAuthState();
+  if (!state.accessToken) return;
+  try {
+    await performAuthRequest('/invalidate', {
+      accessToken: state.accessToken,
+      clientToken: state.clientToken || getClientToken()
+    });
+  } catch (err) {
+    console.warn('[auth] Failed to invalidate session', err);
+  }
+};
+
+const registerDraslAccount = async ({ username, password, playerName, inviteCode }) => {
+  if (!authConfig) {
+    throw new Error('Registration is not configured.');
+  }
+  if (!authConfig.allowRegistration) {
+    throw new Error('Registration is disabled for this launcher.');
+  }
+  const sanitizedUsername = String(username || '').trim();
+  if (!sanitizedUsername || typeof password !== 'string' || !password.length) {
+    throw new Error('Username and password are required.');
+  }
+  const sanitizedPlayerName = String(playerName || sanitizedUsername).trim();
+  const payload = {
+    username: sanitizedUsername,
+    password,
+    playerName: sanitizedPlayerName || sanitizedUsername,
+    inviteCode: inviteCode ? String(inviteCode).trim() || undefined : undefined,
+    requestApiToken: false
+  };
+  await performDraslRequest('/drasl/api/v2/users', payload);
+  return authenticateWithPassword(sanitizedUsername, password);
+};
+
 ipcMain.handle('app:bootstrap', async () => ({
   settings: serializeSettings(),
+  auth: serializeAuthState(),
   modpacks: serializeModpacks(),
   servers: serializeServers(),
   activeModpackId,
@@ -833,6 +1357,67 @@ ipcMain.handle('app:bootstrap', async () => ({
     minRamMb: DEFAULT_MIN_RAM
   }
 }));
+
+ipcMain.handle('auth:status', async () => ({
+  ok: true,
+  auth: serializeAuthState()
+}));
+
+ipcMain.handle('auth:login', async (_event, payload = {}) => {
+  try {
+    const auth = await authenticateWithPassword(payload.username, payload.password);
+    return { ok: true, auth };
+  } catch (err) {
+    console.warn('[auth] login failed', err);
+    return {
+      ok: false,
+      error: err.message || 'Login failed',
+      code: err.code || null,
+      details: err.body || null
+    };
+  }
+});
+
+ipcMain.handle('auth:register', async (_event, payload = {}) => {
+  try {
+    const auth = await registerDraslAccount({
+      username: payload.username,
+      password: payload.password,
+      playerName: payload.playerName,
+      inviteCode: payload.inviteCode
+    });
+    return { ok: true, auth };
+  } catch (err) {
+    console.warn('[auth] registration failed', err);
+    return {
+      ok: false,
+      error: err.message || 'Registration failed',
+      code: err.code || null,
+      details: err.body || null
+    };
+  }
+});
+
+ipcMain.handle('auth:logout', async () => {
+  await invalidateAuthSession();
+  const auth = await clearAuthState();
+  return { ok: true, auth };
+});
+
+ipcMain.handle('auth:refresh', async () => {
+  try {
+    const auth = await refreshAuthSession();
+    return { ok: true, auth };
+  } catch (err) {
+    console.warn('[auth] refresh failed', err);
+    await clearAuthState();
+    return {
+      ok: false,
+      error: err.message || 'Failed to refresh session',
+      code: err.code || null
+    };
+  }
+});
 
 ipcMain.handle('settings:update', async (_event, patch) => {
   await updateUserSettings(patch);
@@ -920,7 +1505,44 @@ ipcMain.handle('server:status', async (_event, serverId) => {
 ipcMain.handle('mc:launch', async (event, payload = {}) => {
   try {
     const launcher = new Client();
-    const nickname = String(payload.username || userSettings.nickname || 'Player').slice(0, 32);
+    const authState = ensureAuthState();
+    const requiresAuth = Boolean(authConfig);
+
+    let sessionAuthorization = null;
+
+    if (requiresAuth) {
+      if (!authState.accessToken) {
+        dialog.showErrorBox('Authentication Required', 'Please log in before launching the game.');
+        return { ok: false, error: 'Authentication required' };
+      }
+      try {
+        await refreshAuthSession();
+      } catch (refreshErr) {
+        console.warn('[auth] refresh before launch failed', refreshErr);
+        await clearAuthState();
+        dialog.showErrorBox('Authentication Error', `Failed to refresh session: ${refreshErr.message}. Please log in again.`);
+        return { ok: false, error: 'Failed to refresh authentication. Please log in again.' };
+      }
+
+      const refreshed = ensureAuthState();
+      if (!refreshed.selectedProfile || !refreshed.accessToken) {
+        await clearAuthState();
+        dialog.showErrorBox('Authentication Error', 'No playable profile available. Please log in again.');
+        return { ok: false, error: 'Missing playable profile after refresh' };
+      }
+
+      sessionAuthorization = {
+        access_token: refreshed.accessToken,
+        client_token: refreshed.clientToken || getClientToken(),
+        uuid: refreshed.selectedProfile.id,
+        name: refreshed.selectedProfile.name,
+        user_properties: formatUserPropertiesJson(refreshed.user?.properties)
+      };
+    }
+
+    const nickname = sessionAuthorization
+      ? sessionAuthorization.name
+      : String(payload.username || userSettings.nickname || 'Player').slice(0, 32);
     const ramMb = clampRam(payload.ramMb !== undefined ? payload.ramMb : userSettings.ramMb);
 
     userSettings.nickname = nickname;
@@ -931,13 +1553,31 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
     await ensurePath(activePaths.modsDir);
 
     const forgeInstaller = await ensureForgeInstaller(activeModpack.forgeVersion || config.FORGE_VERSION);
+    const javaArgs = [...CLEAN_JAVA_ARGS];
+
+    if (sessionAuthorization && authConfig) {
+      const injectorPath = await ensureAuthlibInjector();
+      if (!injectorPath) {
+        throw new Error('authlib-injector is not available.');
+      }
+      javaArgs.push(`-javaagent:${injectorPath}=${authConfig.baseUrl}`);
+    }
+
+    const authorization = sessionAuthorization || {
+      name: nickname || 'Player',
+      uuid: '00000000-0000-0000-0000-000000000000',
+      access_token: '0',
+      client_token: getClientToken(),
+      user_properties: '{}'
+    };
+
+    if (!authorization.user_properties) {
+      const latest = ensureAuthState();
+      authorization.user_properties = formatUserPropertiesJson(latest.user?.properties);
+    }
 
     const opts = {
-      authorization: {
-        name: nickname || 'Player',
-        uuid: '00000000-0000-0000-0000-000000000000',
-        access_token: '0'
-      },
+      authorization,
       root: activePaths.gameRoot,
       version: { number: deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION), type: 'release' },
       forge: forgeInstaller,
@@ -946,7 +1586,7 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
         min: `${Math.min(ramMb, DEFAULT_MIN_RAM)}`
       },
       javaPath: undefined,
-      customArgs: CLEAN_JAVA_ARGS
+      customArgs: javaArgs
     };
 
     launcher.on('debug', (log) => event.sender.send('mc:log', String(log)));

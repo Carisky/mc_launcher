@@ -82,6 +82,25 @@
         const [profileModalRam, setProfileModalRam] = useState("");
         const [profileModalSaving, setProfileModalSaving] = useState(false);
         const [profileModalError, setProfileModalError] = useState("");
+        const [auth, setAuth] = useState({
+          status: "unknown",
+          allowRegistration: false,
+          hasSession: false,
+          provider: null,
+          baseUrl: null,
+        });
+        const [authError, setAuthError] = useState("");
+        const [authProcessing, setAuthProcessing] = useState(false);
+        const [loginUsername, setLoginUsername] = useState("");
+        const [loginPassword, setLoginPassword] = useState("");
+        const [loginSubmitting, setLoginSubmitting] = useState(false);
+        const [registerUsername, setRegisterUsername] = useState("");
+        const [registerPassword, setRegisterPassword] = useState("");
+        const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
+        const [registerPlayerName, setRegisterPlayerName] = useState("");
+        const [registerInviteCode, setRegisterInviteCode] = useState("");
+        const [registerSubmitting, setRegisterSubmitting] = useState(false);
+        const [showRegistration, setShowRegistration] = useState(false);
         const profileModalLabelRef = useRef(null);
         const logsRef = useRef(null);
         const readyRef = useRef(false);
@@ -103,6 +122,53 @@
           };
         }, []);
 
+        const applyAuthState = useCallback(
+          (nextAuth) => {
+            if (!nextAuth) {
+              setAuth({
+                status: "disabled",
+                allowRegistration: false,
+                hasSession: false,
+                provider: null,
+                baseUrl: null,
+                domain: null,
+                selectedProfile: null,
+                availableProfiles: [],
+                user: null,
+                lastAuthAt: null,
+              });
+              setAuthError("");
+              return;
+            }
+
+            const normalized = {
+              status:
+                nextAuth.status ||
+                (nextAuth.hasSession ? "authenticated" : "unauthenticated"),
+              allowRegistration: !!nextAuth.allowRegistration,
+              hasSession: !!nextAuth.hasSession,
+              provider: nextAuth.provider || null,
+              baseUrl: nextAuth.baseUrl || null,
+              domain: nextAuth.domain || null,
+              selectedProfile: nextAuth.selectedProfile || null,
+              availableProfiles: Array.isArray(nextAuth.availableProfiles)
+                ? nextAuth.availableProfiles
+                : [],
+              user: nextAuth.user || null,
+              lastAuthAt: nextAuth.lastAuthAt || null,
+            };
+            setAuth(normalized);
+            setAuthError("");
+            if (
+              normalized.status === "authenticated" &&
+              normalized.selectedProfile?.name
+            ) {
+              setNickname((prev) => normalized.selectedProfile.name || prev);
+            }
+          },
+          [setAuth, setAuthError, setNickname]
+        );
+
         const applySettings = (
           nextSettings,
           opts = { preserveNickname: false }
@@ -123,6 +189,7 @@
           } else {
             setActiveProfileId(nextProfiles[0]?.id ?? null);
           }
+          applyAuthState(nextSettings.auth || null);
         };
 
         const getServerDisplayAddress = useCallback((entry) => {
@@ -162,6 +229,168 @@
           }
           return `${online}`;
         };
+
+        const handleAuthLogin = useCallback(
+          async (event) => {
+            event.preventDefault();
+            if (loginSubmitting) return;
+
+            const trimmedUsername = loginUsername.trim();
+            if (!trimmedUsername || !loginPassword) {
+              setAuthError("Введите логин и пароль.");
+              return;
+            }
+
+            if (typeof window.launcher?.authLogin !== "function") {
+              setAuthError("Авторизация недоступна в этой сборке.");
+              return;
+            }
+
+            setAuthError("");
+            setLoginSubmitting(true);
+            try {
+              const result = await window.launcher.authLogin({
+                username: trimmedUsername,
+                password: loginPassword,
+              });
+              if (!result?.ok) {
+                throw new Error(result?.error || "Не удалось войти.");
+              }
+              if (result.auth) {
+                applyAuthState(result.auth);
+                if (result.auth.selectedProfile?.name) {
+                  setLoginUsername(result.auth.selectedProfile.name);
+                }
+              }
+              setStatus(
+                `Выполнен вход как ${
+                  result?.auth?.selectedProfile?.name || trimmedUsername
+                }.`
+              );
+              setLoginPassword("");
+              setShowRegistration(false);
+            } catch (err) {
+              setAuthError(err.message || "Не удалось войти.");
+            } finally {
+              setLoginSubmitting(false);
+            }
+          },
+          [loginSubmitting, loginUsername, loginPassword, applyAuthState]
+        );
+
+        const handleAuthLogout = useCallback(async () => {
+          if (authProcessing) return;
+          if (typeof window.launcher?.authLogout !== "function") {
+            setAuthError("Завершение сеанса недоступно.");
+            return;
+          }
+          setAuthError("");
+          setAuthProcessing(true);
+          try {
+            const result = await window.launcher.authLogout();
+            if (result?.auth) {
+              applyAuthState(result.auth);
+            }
+            setStatus("Вы вышли из аккаунта.");
+          } catch (err) {
+            setAuthError(err.message || "Не удалось завершить сеанс.");
+          } finally {
+            setAuthProcessing(false);
+          }
+        }, [authProcessing, applyAuthState]);
+
+        const handleAuthRefresh = useCallback(async () => {
+          if (authProcessing) return;
+          if (typeof window.launcher?.authRefresh !== "function") {
+            setAuthError("Обновление сессии недоступно.");
+            return;
+          }
+          setAuthError("");
+          setAuthProcessing(true);
+          try {
+            const result = await window.launcher.authRefresh();
+            if (!result?.ok) {
+              throw new Error(result?.error || "Не удалось обновить сессию.");
+            }
+            if (result.auth) {
+              applyAuthState(result.auth);
+            }
+            setStatus("Сессия обновлена.");
+          } catch (err) {
+            setAuthError(err.message || "Не удалось обновить сессию.");
+          } finally {
+            setAuthProcessing(false);
+          }
+        }, [authProcessing, applyAuthState]);
+
+        const handleRegisterSubmit = useCallback(
+          async (event) => {
+            event.preventDefault();
+            if (!auth.allowRegistration || registerSubmitting) return;
+            if (typeof window.launcher?.authRegister !== "function") {
+              setAuthError("Регистрация недоступна.");
+              return;
+            }
+
+            const username = registerUsername.trim();
+            if (!username || !registerPassword || !registerConfirmPassword) {
+              setAuthError("Заполните все поля регистрации.");
+              return;
+            }
+            if (registerPassword !== registerConfirmPassword) {
+              setAuthError("Пароли не совпадают.");
+              return;
+            }
+
+            setAuthError("");
+            setRegisterSubmitting(true);
+            try {
+              const result = await window.launcher.authRegister({
+                username,
+                password: registerPassword,
+                playerName: registerPlayerName.trim() || username,
+                inviteCode: registerInviteCode.trim() || undefined,
+              });
+              if (!result?.ok) {
+                throw new Error(result?.error || "Регистрация не удалась.");
+              }
+              if (result.auth) {
+                applyAuthState(result.auth);
+                if (result.auth.selectedProfile?.name) {
+                  setLoginUsername(result.auth.selectedProfile.name);
+                }
+              }
+              setStatus(`Аккаунт ${username} создан и авторизован.`);
+              setShowRegistration(false);
+              setRegisterPassword("");
+              setRegisterConfirmPassword("");
+              setRegisterUsername("");
+              setRegisterPlayerName("");
+              setRegisterInviteCode("");
+            } catch (err) {
+              setAuthError(err.message || "Регистрация не удалась.");
+            } finally {
+              setRegisterSubmitting(false);
+            }
+          },
+          [
+            auth.allowRegistration,
+            registerSubmitting,
+            registerUsername,
+            registerPassword,
+            registerConfirmPassword,
+            registerPlayerName,
+            registerInviteCode,
+            applyAuthState,
+          ]
+        );
+
+        const handleToggleRegistration = useCallback(() => {
+          setAuthError("");
+          setShowRegistration((prev) => !prev);
+        }, []);
+
+        const authBusy = authProcessing || loginSubmitting || registerSubmitting;
 
         const refreshServerStatus = useCallback(
           async (server) => {
@@ -232,6 +461,7 @@
           (async () => {
             try {
               const bootstrap = await window.launcher.bootstrap();
+              const settings = bootstrap.settings || {};
               setModpacks(bootstrap.modpacks || []);
               setActiveModpackId(bootstrap.activeModpackId || null);
               setPaths(bootstrap.paths || {});
@@ -242,7 +472,16 @@
               setDefaults(
                 bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 }
               );
-              applySettings(bootstrap.settings || {});
+              applySettings(settings);
+              applyAuthState(bootstrap.auth || settings.auth || null);
+              const initialLoginName =
+                bootstrap.auth?.selectedProfile?.name ||
+                bootstrap.auth?.user?.username ||
+                settings.nickname ||
+                "";
+              setLoginUsername(initialLoginName || "");
+              setAuthError("");
+              setShowRegistration(false);
               setStatus("Лаунчер готов! Выбирайте сборку или профиль.");
               setBootstrapped(true);
               readyRef.current = true;
@@ -636,6 +875,167 @@
                 <span className="brand-accent">Custom</span>
                 <span>Launcher</span>
                 <span className="brand-sub">Minecraft Edition</span>
+              </div>
+              <div className="sidebar-section auth-section">
+                <div className="sidebar-header">
+                  <h2>Account</h2>
+                </div>
+                <div className={`auth-card${auth.status === "authenticated" ? " authenticated" : ""}`}>
+                  {auth.status === "authenticated" ? (
+                    <div className="auth-summary">
+                      <div className="auth-identity">
+                        <span className="auth-name">
+                          {auth.selectedProfile?.name ||
+                            auth.user?.username ||
+                            loginUsername ||
+                            "Player"}
+                        </span>
+                        {auth.baseUrl && (
+                          <span className="auth-base">{auth.baseUrl}</span>
+                        )}
+                      </div>
+                      <div className="auth-actions">
+                        <button
+                          type="button"
+                          className="ghost-button"
+                          onClick={handleAuthRefresh}
+                          disabled={authBusy}
+                        >
+                          {authBusy ? "Refreshing..." : "Refresh"}
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost-button danger"
+                          onClick={handleAuthLogout}
+                          disabled={authBusy}
+                        >
+                          Sign out
+                        </button>
+                      </div>
+                    </div>
+                  ) : auth.status === "disabled" ? (
+                    <div className="auth-disabled">
+                      <p>Authentication server is not configured.</p>
+                    </div>
+                  ) : (
+                    <form className="auth-form" onSubmit={handleAuthLogin}>
+                      <label>
+                        <span>Username</span>
+                        <input
+                          value={loginUsername}
+                          onChange={(event) => setLoginUsername(event.target.value)}
+                          autoComplete="username"
+                          placeholder="Your nickname"
+                          disabled={authBusy}
+                        />
+                      </label>
+                      <label>
+                        <span>Password</span>
+                        <input
+                          type="password"
+                          value={loginPassword}
+                          onChange={(event) => setLoginPassword(event.target.value)}
+                          autoComplete="current-password"
+                          placeholder="Password"
+                          disabled={authBusy}
+                        />
+                      </label>
+                      <div className="auth-actions">
+                        <button type="submit" className="primary" disabled={authBusy}>
+                          {loginSubmitting ? "Signing in..." : "Sign in"}
+                        </button>
+                        {auth.allowRegistration && (
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={handleToggleRegistration}
+                            disabled={authBusy}
+                          >
+                            {showRegistration ? "Cancel" : "Create account"}
+                          </button>
+                        )}
+                      </div>
+                    </form>
+                  )}
+                  {showRegistration &&
+                    auth.allowRegistration &&
+                    auth.status !== "authenticated" && (
+                      <form
+                        className="auth-form registration"
+                        onSubmit={handleRegisterSubmit}
+                      >
+                        <label>
+                          <span>Username</span>
+                          <input
+                            value={registerUsername}
+                            onChange={(event) =>
+                              setRegisterUsername(event.target.value)
+                            }
+                            placeholder="New username"
+                            disabled={authBusy}
+                          />
+                        </label>
+                        <label>
+                          <span>Password</span>
+                          <input
+                            type="password"
+                            value={registerPassword}
+                            onChange={(event) =>
+                              setRegisterPassword(event.target.value)
+                            }
+                            placeholder="Password"
+                            disabled={authBusy}
+                          />
+                        </label>
+                        <label>
+                          <span>Confirm password</span>
+                          <input
+                            type="password"
+                            value={registerConfirmPassword}
+                            onChange={(event) =>
+                              setRegisterConfirmPassword(event.target.value)
+                            }
+                            placeholder="Repeat password"
+                            disabled={authBusy}
+                          />
+                        </label>
+                        <label>
+                          <span>Player name</span>
+                          <input
+                            value={registerPlayerName}
+                            onChange={(event) =>
+                              setRegisterPlayerName(event.target.value)
+                            }
+                            placeholder="In-game nickname"
+                            disabled={authBusy}
+                          />
+                        </label>
+                        <label>
+                          <span>Invite code (optional)</span>
+                          <input
+                            value={registerInviteCode}
+                            onChange={(event) =>
+                              setRegisterInviteCode(event.target.value)
+                            }
+                            placeholder="Invite code"
+                            disabled={authBusy}
+                          />
+                        </label>
+                        <div className="auth-actions">
+                          <button
+                            type="submit"
+                            className="primary"
+                            disabled={authBusy}
+                          >
+                            {registerSubmitting ? "Creating..." : "Create account"}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  {authError && (
+                    <div className="auth-error">{authError}</div>
+                  )}
+                </div>
               </div>
               <div className="sidebar-section highlight">
                 <div className="sidebar-header">

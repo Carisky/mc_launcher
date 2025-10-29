@@ -7,6 +7,17 @@
     "-XX:-UseAdaptiveSizePolicy",
     "-XX:-OmitStackTraceInFastThrow"
   ],
+  "AUTH": {
+    "provider": "drasl",
+    "domain": "context-monica-heaven-diane.trycloudflare.com",
+    "baseUrl": "https://context-monica-heaven-diane.trycloudflare.com",
+    "allowRegistration": true,
+    "authlibInjector": {
+      "version": "1.2.6",
+      "downloadUrl": "https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.6/authlib-injector-1.2.6.jar",
+      "sha256": "6DFF7951C41D61EBA78F9B034BE610ADE0E80D3309300742057D1866375D0427"
+    }
+  },
   "MODPACKS": [
     {
       "id": "dtm",
