@@ -25,7 +25,7 @@
   "SERVERS": [
     {
       "id": "main",
-      "name": "Главный сервер",
+      "name": "DTM 1.12.2",
       "address": "192.168.195.85",
       "port": 25565,
       "refreshIntervalSeconds": 45,

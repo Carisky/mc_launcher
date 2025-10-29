@@ -6,6 +6,7 @@ const extract = require('extract-zip');
 const os = require('os');
 const { Client } = require('minecraft-launcher-core');
 const { Rcon } = require('rcon-client');
+const nbt = require('prismarine-nbt');
 
 const DEFAULT_STATUS_API = 'https://api.mcstatus.io/v2/status/java';
 const MIN_REFRESH_INTERVAL_MS = 10000;
@@ -89,6 +90,19 @@ const toPositiveInteger = (value) => {
   return Number.isFinite(num) && num > 0 ? Math.floor(num) : null;
 };
 
+const toBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return Boolean(value);
+};
+
 const resolveRefreshIntervalMs = (entry = {}) => {
   const directMs = toPositiveInteger(entry.refreshIntervalMs || entry.refreshMs);
   if (directMs) return Math.max(MIN_REFRESH_INTERVAL_MS, directMs);
@@ -157,6 +171,7 @@ const servers = rawServers
     const port = toPositiveInteger(entry.port) || null;
     const statusApi = resolveStatusApi(entry);
     const rcon = normalizeRconConfig(entry.rcon, address, port);
+    const icon = typeof entry.icon === 'string' ? entry.icon.trim() || null : null;
 
     return {
       id: String(entry.id || `server-${index + 1}`),
@@ -165,12 +180,135 @@ const servers = rawServers
       port,
       statusApi,
       refreshIntervalMs: resolveRefreshIntervalMs(entry),
-      rcon
+      rcon,
+      acceptTextures: toBoolean(entry.acceptTextures, true),
+      hideAddress: toBoolean(entry.hideAddress, false),
+      icon
     };
   })
   .filter(Boolean);
 
 const getServerById = (id) => servers.find((server) => server.id === id) || null;
+
+const normalizeServerForDat = (server) => {
+  const ip = displayServerAddress(server);
+  if (!ip) return null;
+  return {
+    ip,
+    name: server.name,
+    hideAddress: toBoolean(server.hideAddress, false),
+    acceptTextures: toBoolean(server.acceptTextures, true),
+    icon: typeof server.icon === 'string' && server.icon ? server.icon : null
+  };
+};
+
+const buildServersDatEntry = (server) => {
+  const entry = {
+    name: { type: 'string', value: server.name },
+    ip: { type: 'string', value: server.ip },
+    hideAddress: { type: 'byte', value: server.hideAddress ? 1 : 0 },
+    acceptTextures: { type: 'byte', value: server.acceptTextures ? 1 : 0 }
+  };
+
+  if (server.icon) {
+    entry.icon = { type: 'string', value: server.icon };
+  }
+
+  return entry;
+};
+
+const applyConfigServersToDat = (existingEntries, configByIp) => {
+  const finalEntries = [];
+
+  for (const entry of existingEntries) {
+    const ipTag = entry?.ip;
+    const ip = ipTag && typeof ipTag.value === 'string' ? ipTag.value : null;
+    if (!ip) {
+      finalEntries.push(entry);
+      continue;
+    }
+
+    const override = configByIp.get(ip);
+    if (override) {
+      entry.name = { type: 'string', value: override.name };
+      entry.ip = { type: 'string', value: override.ip };
+      entry.hideAddress = { type: 'byte', value: override.hideAddress ? 1 : 0 };
+      entry.acceptTextures = { type: 'byte', value: override.acceptTextures ? 1 : 0 };
+      if (override.icon) {
+        entry.icon = { type: 'string', value: override.icon };
+      } else {
+        delete entry.icon;
+      }
+      configByIp.delete(ip);
+    }
+
+    finalEntries.push(entry);
+  }
+
+  for (const remaining of configByIp.values()) {
+    finalEntries.push(buildServersDatEntry(remaining));
+  }
+
+  return finalEntries;
+};
+
+const syncServersDat = async (gameRoot, serverList) => {
+  if (!gameRoot || !Array.isArray(serverList)) return null;
+
+  const normalized = serverList
+    .map(normalizeServerForDat)
+    .filter((entry) => entry && entry.ip && entry.name);
+
+  if (!normalized.length) return null;
+
+  const serversDatPath = path.join(gameRoot, 'servers.dat');
+  const configByIp = new Map(normalized.map((entry) => [entry.ip, entry]));
+
+  let existingBuffer = null;
+  let existingEntries = [];
+
+  try {
+    existingBuffer = await fs.readFile(serversDatPath);
+    const parsed = await nbt.parse(existingBuffer);
+    const rawEntries = parsed?.parsed?.value?.servers?.value?.value;
+    if (Array.isArray(rawEntries)) {
+      existingEntries = rawEntries.map((entry) => ({ ...entry }));
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.warn(`[servers.dat] Failed to read existing file at ${serversDatPath}:`, err);
+    }
+  }
+
+  const finalEntries = applyConfigServersToDat(existingEntries, configByIp);
+  const payload = {
+    type: 'compound',
+    name: '',
+    value: {
+      servers: {
+        type: 'list',
+        value: {
+          type: 'compound',
+          value: finalEntries
+        }
+      }
+    }
+  };
+
+  const buffer = nbt.writeUncompressed(payload);
+  if (existingBuffer && existingBuffer.equals(buffer)) {
+    return serversDatPath;
+  }
+
+  try {
+    await fs.ensureDir(path.dirname(serversDatPath));
+    await fs.writeFile(serversDatPath, buffer);
+    return serversDatPath;
+  } catch (err) {
+    console.warn(`[servers.dat] Failed to write file at ${serversDatPath}:`, err);
+    return null;
+  }
+};
 
 const usePerModpackRoots = Array.isArray(config.MODPACKS) && config.MODPACKS.length > 0;
 
@@ -263,6 +401,7 @@ const updateActiveModpack = async (modpackId) => {
   activePaths = resolveModpackPaths(activeModpack);
   userSettings.selectedModpack = activeModpack.id;
   await ensurePath(activePaths.modsDir);
+  await syncServersDat(activePaths.gameRoot, servers);
   await persistUserSettings();
 };
 
@@ -588,6 +727,7 @@ app.whenReady().then(async () => {
   await ensurePath(BASE_GAME_ROOT);
   await ensurePath(activePaths.modsDir);
   await ensurePath(FORGE_DIR);
+  await syncServersDat(activePaths.gameRoot, servers);
   createWindow();
 });
 
