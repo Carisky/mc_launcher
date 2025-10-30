@@ -1,4 +1,4 @@
-{
+﻿{
   "GAME_ROOT": "./runtime",
   "FORGE_VERSION": "1.12.2-forge-14.23.5.2860",
   "DEFAULT_RAM_MB": 8192,
@@ -55,7 +55,7 @@
     "url": {
       "meta": "https://bmclapi2.bangbang93.com",
       "resource": "https://bmclapi2.bangbang93.com/assets",
-      "mavenForge": "https://bmclapi2.bangbang93.com/forge/",
+      "mavenForge": "https://bmclapi2.bangbang93.com/maven/",
       "defaultRepoForge": "https://bmclapi2.bangbang93.com/maven/",
       "fallbackMaven": "https://bmclapi2.bangbang93.com/maven/"
     }

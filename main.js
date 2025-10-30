@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const os = require('os');
 const { pipeline } = require('stream/promises');
 const { Client } = require('minecraft-launcher-core');
+const MCLCHandler = require('minecraft-launcher-core/components/handler');
 const { Rcon } = require('rcon-client');
 const nbt = require('prismarine-nbt');
 
@@ -114,6 +115,75 @@ const rewriteUrlForMirror = (url, overrides) => {
   return target;
 };
 
+const normalizeForgeMirrorUrl = (url, overrides) => {
+  if (typeof url !== 'string') return url;
+  let adjusted = rewriteUrlForMirror(url, overrides);
+  if (typeof adjusted !== 'string' || !overrides?.url?.mavenForge) return adjusted;
+
+  const normalizedForgeBase = ensureSingleTrailingSlash(overrides.url.mavenForge);
+  const fallbackForgeBase = normalizedForgeBase.replace(/\/maven\/$/i, '/forge/');
+  const trimmedForgeBase = trimTrailingSlashes(normalizedForgeBase);
+  const trimmedFallbackForgeBase = trimTrailingSlashes(fallbackForgeBase);
+
+  if (normalizedForgeBase !== fallbackForgeBase) {
+    if (adjusted.startsWith(fallbackForgeBase)) {
+      adjusted = normalizedForgeBase + adjusted.slice(fallbackForgeBase.length);
+    } else if (adjusted.startsWith(trimmedFallbackForgeBase)) {
+      adjusted = trimmedForgeBase + adjusted.slice(trimmedFallbackForgeBase.length);
+    }
+  }
+
+  return adjusted;
+};
+
+const rewriteForgeVersionJsonForMirror = (payload, overrides) => {
+  if (!payload || typeof payload !== 'object' || !overrides || !overrides.url) return payload;
+  const cloned = JSON.parse(JSON.stringify(payload));
+
+  const rewriteLibraryUrls = (library) => {
+    if (!library || typeof library !== 'object') return;
+    if (library.url) {
+      library.url = normalizeForgeMirrorUrl(library.url, overrides);
+    }
+    if (library.downloads && typeof library.downloads === 'object') {
+      if (library.downloads.artifact && library.downloads.artifact.url) {
+        library.downloads.artifact.url = normalizeForgeMirrorUrl(library.downloads.artifact.url, overrides);
+      }
+      if (library.downloads.classifiers && typeof library.downloads.classifiers === 'object') {
+        for (const classifier of Object.values(library.downloads.classifiers)) {
+          if (classifier && classifier.url) {
+            classifier.url = normalizeForgeMirrorUrl(classifier.url, overrides);
+          }
+        }
+      }
+    }
+  };
+
+  if (Array.isArray(cloned.libraries)) {
+    cloned.libraries.forEach(rewriteLibraryUrls);
+  }
+  if (Array.isArray(cloned.mavenFiles)) {
+    cloned.mavenFiles.forEach(rewriteLibraryUrls);
+  }
+
+  return cloned;
+};
+
+if (!MCLCHandler.prototype.__mirrorDownloadPatched) {
+  const originalDownloadAsync = MCLCHandler.prototype.downloadAsync;
+  MCLCHandler.prototype.downloadAsync = function patchedDownloadAsync(url, directory, name, retry, type) {
+    const overrides = this.options?.overrides;
+    if (typeof url === 'string') {
+      const adjusted = normalizeForgeMirrorUrl(url, overrides);
+      if (typeof adjusted === 'string') {
+        url = adjusted;
+      }
+    }
+    return originalDownloadAsync.call(this, url, directory, name, retry, type);
+  };
+  MCLCHandler.prototype.__mirrorDownloadPatched = true;
+}
+
 const rewriteVersionJsonForMirror = (payload, overrides) => {
   if (!payload || typeof payload !== 'object' || !overrides || !overrides.url) return payload;
   const cloned = JSON.parse(JSON.stringify(payload));
@@ -212,6 +282,32 @@ const ensureVersionMetadataForMirror = async (gameRoot, versionNumber, overrides
   await fs.ensureDir(versionDir);
   await fs.writeJson(versionJsonPath, rewrittenJson, { spaces: 2 });
   return versionJsonPath;
+};
+
+const ensureForgeVersionJsonForMirror = async (gameRoot, forgeVersion, overrides) => {
+  if (!gameRoot || !forgeVersion || !overrides || !overrides.url) return null;
+
+  const baseVersion = typeof forgeVersion === 'string'
+    ? (forgeVersion.split('-forge')[0] || forgeVersion)
+    : '1.12.2';
+  const forgeDir = path.join(gameRoot, 'forge', baseVersion);
+  const forgeJsonPath = path.join(forgeDir, 'version.json');
+
+  if (!await fs.pathExists(forgeJsonPath)) {
+    return null;
+  }
+
+  try {
+    const existing = await fs.readJson(forgeJsonPath);
+    const rewritten = rewriteForgeVersionJsonForMirror(existing, overrides);
+    if (JSON.stringify(existing) !== JSON.stringify(rewritten)) {
+      await fs.writeJson(forgeJsonPath, rewritten, { spaces: 2 });
+    }
+    return forgeJsonPath;
+  } catch (err) {
+    console.warn(`[mclc] Failed to rewrite Forge version metadata at ${forgeJsonPath}:`, err);
+    return null;
+  }
 };
 
 const DEFAULT_RELATIVE_ROOT = config.GAME_ROOT && !path.isAbsolute(config.GAME_ROOT)
@@ -1775,6 +1871,13 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
 
     const baseVersion = deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION);
     const customOverrides = buildMclcOverrides();
+    if (customOverrides?.url) {
+      await ensureForgeVersionJsonForMirror(
+        activePaths.gameRoot,
+        activeModpack.forgeVersion || config.FORGE_VERSION,
+        customOverrides
+      );
+    }
     let versionJsonPath = null;
     if (customOverrides?.url?.meta) {
       versionJsonPath = await ensureVersionMetadataForMirror(activePaths.gameRoot, baseVersion, customOverrides);
