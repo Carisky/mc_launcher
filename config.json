@@ -21,8 +21,8 @@
   "MODPACKS": [
     {
       "id": "dtm",
-      "name": "DTM Modpack",
-      "description": "Основная сборка DTM. Forge 1.12.2, синхронизация из GitHub.",
+      "name": "DTM",
+      "description": "DTM 1.12.2",
       "icon": "https://raw.githubusercontent.com/github/explore/main/topics/minecraft/minecraft.png",
       "forgeVersion": "1.12.2-forge-14.23.5.2860",
       "github": {
