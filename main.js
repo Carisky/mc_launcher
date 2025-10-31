@@ -18,6 +18,8 @@ const CONFIG_PATH = path.join(__dirname, 'config.json');
 const configRaw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
 const config = JSON.parse(configRaw);
 
+let mainWindow = null;
+
 const cloneJson = (value) => {
   if (!value || typeof value !== 'object') return null;
   return JSON.parse(JSON.stringify(value));
@@ -820,8 +822,6 @@ const normalizeSettings = (settings = {}) => {
   const sanitized = {
     nickname: String(settings.nickname || config.DEFAULT_NICKNAME || 'Player').slice(0, 32),
     ramMb: Number(settings.ramMb) || DEFAULT_RAM,
-    activeProfileId: settings.activeProfileId || null,
-    profiles: Array.isArray(settings.profiles) ? settings.profiles : [],
     selectedModpack: settings.selectedModpack || config.ACTIVE_MODPACK || modpacks[0].id,
     auth: normalizeAuthSnapshot(settings.auth || {}, {
       provider: authConfig ? authConfig.provider : undefined,
@@ -834,17 +834,6 @@ const normalizeSettings = (settings = {}) => {
 
   if (!modpacks.find(m => m.id === sanitized.selectedModpack)) {
     sanitized.selectedModpack = modpacks[0].id;
-  }
-
-  sanitized.profiles = sanitized.profiles.map(profile => ({
-    id: profile.id || `profile-${Date.now()}`,
-    label: String(profile.label || 'Профиль'),
-    nickname: String(profile.nickname || sanitized.nickname).slice(0, 32),
-    ramMb: Math.max(DEFAULT_MIN_RAM, Math.min(65536, Number(profile.ramMb) || sanitized.ramMb))
-  }));
-
-  if (sanitized.activeProfileId && !sanitized.profiles.find(p => p.id === sanitized.activeProfileId)) {
-    sanitized.activeProfileId = null;
   }
 
   return sanitized;
@@ -1085,59 +1074,9 @@ const updateUserSettings = async (patch = {}) => {
   if (patch.ramMb !== undefined) {
     userSettings.ramMb = clampRam(patch.ramMb);
   }
-  if (patch.activeProfileId !== undefined) {
-    userSettings.activeProfileId = patch.activeProfileId && userSettings.profiles.find(p => p.id === patch.activeProfileId)
-      ? patch.activeProfileId
-      : null;
-  }
   if (patch.selectedModpack !== undefined && modpacks.find(m => m.id === patch.selectedModpack)) {
     await updateActiveModpack(patch.selectedModpack);
   }
-  await persistUserSettings();
-  return userSettings;
-};
-
-const setProfile = async (profile) => {
-  const profiles = [...userSettings.profiles];
-  const existingIndex = profile.id ? profiles.findIndex(p => p.id === profile.id) : -1;
-  const id = profile.id || `profile-${Date.now()}`;
-  const normalized = {
-    id,
-    label: String(profile.label || 'Профиль').slice(0, 40),
-    nickname: String(profile.nickname || userSettings.nickname).slice(0, 32),
-    ramMb: clampRam(profile.ramMb !== undefined ? profile.ramMb : userSettings.ramMb)
-  };
-
-  if (existingIndex >= 0) {
-    profiles.splice(existingIndex, 1, normalized);
-  } else {
-    profiles.push(normalized);
-  }
-
-  userSettings.profiles = profiles;
-  userSettings.activeProfileId = normalized.id;
-  userSettings.nickname = normalized.nickname;
-  userSettings.ramMb = normalized.ramMb;
-  await persistUserSettings();
-
-  return userSettings;
-};
-
-const deleteProfile = async (profileId) => {
-  userSettings.profiles = userSettings.profiles.filter(p => p.id !== profileId);
-  if (userSettings.activeProfileId === profileId) {
-    userSettings.activeProfileId = null;
-  }
-  await persistUserSettings();
-  return userSettings;
-};
-
-const openProfile = async (profileId) => {
-  const profile = userSettings.profiles.find(p => p.id === profileId);
-  if (!profile) return userSettings;
-  userSettings.activeProfileId = profile.id;
-  userSettings.nickname = profile.nickname;
-  userSettings.ramMb = clampRam(profile.ramMb);
   await persistUserSettings();
   return userSettings;
 };
@@ -1383,7 +1322,11 @@ const fetchServerStatus = async (server) => {
 };
 
 function createWindow() {
-  const win = new BrowserWindow({
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow;
+  }
+
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 760,
     resizable: true,
@@ -1395,8 +1338,12 @@ function createWindow() {
       contextIsolation: true
     }
   });
-  win.removeMenu();
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.removeMenu();
+  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+  return mainWindow;
 }
 
 app.whenReady().then(async () => {
@@ -1409,6 +1356,14 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('activate', () => {
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    mainWindow.show();
+  }
 });
 
 const downloadModsZip = async (modpack) => {
@@ -1801,21 +1756,6 @@ ipcMain.handle('settings:update', async (_event, patch) => {
   return serializeSettings();
 });
 
-ipcMain.handle('profiles:save', async (_event, profile) => {
-  await setProfile(profile || {});
-  return serializeSettings();
-});
-
-ipcMain.handle('profiles:delete', async (_event, profileId) => {
-  await deleteProfile(profileId);
-  return serializeSettings();
-});
-
-ipcMain.handle('profiles:activate', async (_event, profileId) => {
-  await openProfile(profileId);
-  return serializeSettings();
-});
-
 ipcMain.handle('modpack:set', async (_event, modpackId) => {
   await updateActiveModpack(modpackId);
   return {
@@ -1880,6 +1820,22 @@ ipcMain.handle('server:status', async (_event, serverId) => {
 });
 
 ipcMain.handle('mc:launch', async (event, payload = {}) => {
+  let windowHiddenForLaunch = false;
+  const restoreWindowVisibility = () => {
+    if (!windowHiddenForLaunch) {
+      return;
+    }
+    windowHiddenForLaunch = false;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createWindow();
+      return;
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+  };
+
   try {
     const launcher = new Client();
     const authState = ensureAuthState();
@@ -1978,7 +1934,7 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       forge: forgeInstaller,
       memory: {
         max: `${ramMb}`,
-        min: `${Math.min(ramMb, DEFAULT_MIN_RAM)}`
+        min: `${ramMb}`
       },
       javaPath: undefined,
       customArgs: javaArgs
@@ -2003,13 +1959,22 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       opts.overrides = overridesForLaunch;
     }
 
+    launcher.on('close', restoreWindowVisibility);
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+      windowHiddenForLaunch = true;
+    }
+
     launcher.on('debug', (log) => event.sender.send('mc:log', String(log)));
     launcher.on('data', (log) => event.sender.send('mc:log', String(log)));
     launcher.on('progress', (p) => event.sender.send('mc:progress', p));
 
     await launcher.launch(opts);
+    restoreWindowVisibility();
     return { ok: true };
   } catch (err) {
+    restoreWindowVisibility();
     dialog.showErrorBox('MC Launch error', String(err));
     return { ok: false, error: String(err) };
   }

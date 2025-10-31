@@ -68,20 +68,12 @@
         const [status, setStatus] = useState("Загрузка…");
         const [logs, setLogs] = useState([]);
         const [progress, setProgress] = useState(null);
-        const [profiles, setProfiles] = useState([]);
-        const [activeProfileId, setActiveProfileId] = useState(null);
         const [defaults, setDefaults] = useState({
           ramMb: 2048,
           minRamMb: 1024,
         });
         const [syncing, setSyncing] = useState(false);
         const [launching, setLaunching] = useState(false);
-        const [profileModalOpen, setProfileModalOpen] = useState(false);
-        const [profileModalLabel, setProfileModalLabel] = useState("");
-        const [profileModalNickname, setProfileModalNickname] = useState("");
-        const [profileModalRam, setProfileModalRam] = useState("");
-        const [profileModalSaving, setProfileModalSaving] = useState(false);
-        const [profileModalError, setProfileModalError] = useState("");
         const [auth, setAuth] = useState({
           status: "unknown",
           allowRegistration: false,
@@ -101,18 +93,11 @@
         const [registerInviteCode, setRegisterInviteCode] = useState("");
         const [registerSubmitting, setRegisterSubmitting] = useState(false);
         const [showRegistration, setShowRegistration] = useState(false);
-        const profileModalLabelRef = useRef(null);
         const logsRef = useRef(null);
         const readyRef = useRef(false);
         const skipSettingsSync = useRef(false);
         const serverTimersRef = useRef({});
         const isMountedRef = useRef(true);
-
-        useEffect(() => {
-          if (profileModalOpen && profileModalLabelRef.current) {
-            profileModalLabelRef.current.focus();
-          }
-        }, [profileModalOpen]);
 
         useEffect(() => {
           return () => {
@@ -178,17 +163,6 @@
             setNickname(nextSettings.nickname ?? "Player");
           }
           setRam(nextSettings.ramMb ?? defaults.ramMb);
-          const nextProfiles = nextSettings.profiles ?? [];
-          setProfiles(nextProfiles);
-          const potentialActive = nextSettings.activeProfileId ?? null;
-          const hasActive =
-            potentialActive !== null &&
-            nextProfiles.some((profile) => profile.id === potentialActive);
-          if (hasActive) {
-            setActiveProfileId(potentialActive);
-          } else {
-            setActiveProfileId(nextProfiles[0]?.id ?? null);
-          }
           applyAuthState(nextSettings.auth || null);
         };
 
@@ -558,58 +532,12 @@
           return () => clearTimeout(handle);
         }, [nickname, ram]);
 
-        useEffect(() => {
-          if (!readyRef.current) return;
-          if (skipSettingsSync.current) {
-            skipSettingsSync.current = false;
-            return;
-          }
-          window.launcher
-            .updateSettings({
-              activeProfileId,
-            })
-            .catch((err) => console.error(err));
-        }, [activeProfileId]);
-
-        useEffect(() => {
-          if (!activeProfileId) return;
-          setProfiles((prev) =>
-            prev.map((p) => (p.id === activeProfileId ? { ...p, nickname } : p))
-          );
-        }, [nickname, activeProfileId]);
-
       const activeModpack = useMemo(
         () => modpacks.find((pack) => pack.id === activeModpackId) || null,
         [modpacks, activeModpackId]
       );
 
-      useEffect(() => {
-        if (!profiles.length) {
-          if (activeProfileId !== null) setActiveProfileId(null);
-          return;
-        }
-        if (!activeProfileId) {
-          setActiveProfileId(profiles[0].id);
-          return;
-        }
-        if (!profiles.some((profile) => profile.id === activeProfileId)) {
-          setActiveProfileId(profiles[0].id);
-        }
-      }, [profiles, activeProfileId]);
-
-      const activeProfile = useMemo(
-        () => profiles.find((profile) => profile.id === activeProfileId) || null,
-        [profiles, activeProfileId]
-      );
-
         const greeting = useMemo(() => getTimeGreeting(), []);
-        const editorKey = useMemo(
-          () =>
-            `${activeProfileId ?? "none"}-${profiles
-              .map((p) => p.id)
-              .join("|")}`,
-          [activeProfileId, profiles]
-        );
         const bannerSubtitle = useMemo(() => {
           if (activeModpack) {
             return `Готовы к приключениям в сборке "${activeModpack.name}"? Мы уже все подготовили.`;
@@ -621,18 +549,17 @@
         }, [activeModpack, modpacks.length]);
 
         const profileSummary = useMemo(() => {
-          const label = activeProfile?.label || "Черновой профиль";
-          return `Профиль "${label}" · Память ${ram} МБ · Ник ${nickname}`;
-        }, [activeProfile, ram, nickname]);
+          return `Текущие настройки: ник ${nickname}, память ${ram} МБ`;
+        }, [nickname, ram]);
 
         const bannerVisuals = useMemo(() => {
-          const baseProfile = activeProfile || {
-            id: "virtual-active",
-            label: "Черновой профиль",
+          const baseProfile = {
+            id: nickname || "virtual-user",
+            label: "Игрок",
             nickname: nickname || "Игрок",
           };
           return getProfileVisuals(baseProfile);
-        }, [activeProfile, nickname]);
+        }, [nickname]);
 
         const serversLoading = useMemo(
           () =>
@@ -662,91 +589,6 @@
           setRam(clamped);
         };
 
-        const openProfileModal = () => {
-
-          const baseNickname = (activeProfile?.nickname || nickname || "Player").trim() || "Player";
-
-          const labelSuggestion = `${baseNickname} #${profiles.length + 1}`;
-
-          const ramSuggestion = clamp(
-
-            Number(ram) || defaults.ramMb || 2048,
-
-            defaults.minRamMb || 1024,
-
-            65536
-
-          );
-
-          setProfileModalLabel(labelSuggestion);
-
-          setProfileModalNickname(baseNickname);
-
-          setProfileModalRam(String(ramSuggestion));
-
-          setProfileModalError("");
-
-          setProfileModalOpen(true);
-
-        };
-
-
-
-        const closeProfileModal = () => {
-
-          if (profileModalSaving) return;
-
-          setProfileModalOpen(false);
-
-        };
-
-
-
-        const handleProfileModalSubmit = async (event) => {
-          if (event) {
-            event.preventDefault();
-          }
-          if (profileModalSaving) return;
-
-          const cleanNickname = profileModalNickname.trim() || "Player";
-          const cleanLabel =
-            profileModalLabel.trim() ||
-            `${cleanNickname} #${profiles.length + 1}`;
-          const numericRam = clamp(
-            Math.round(Number(profileModalRam) || defaults.ramMb || 2048),
-            defaults.minRamMb || 1024,
-            65536
-          );
-
-          setProfileModalNickname(cleanNickname);
-          setProfileModalLabel(cleanLabel);
-          setProfileModalRam(String(numericRam));
-
-          try {
-            setProfileModalSaving(true);
-            setProfileModalError("");
-            const settings = await window.launcher.saveProfile({
-              label: cleanLabel,
-              nickname: cleanNickname,
-              ramMb: numericRam,
-            });
-            applySettings(settings);
-            setStatus(
-              `Профиль "${cleanLabel}" сохранен. Можно переключаться в списке слева.`
-            );
-            setProfileModalOpen(false);
-          } catch (err) {
-            setProfileModalError(err.message);
-          } finally {
-            setProfileModalSaving(false);
-          }
-        };
-
-        const handleProfileModalRamChange = (value) => {
-
-          setProfileModalRam(value);
-
-        };
 
 
 
@@ -796,49 +638,6 @@
           }
         };
 
-        const handleAddProfile = () => {
-
-          openProfileModal();
-
-        };
-
-
-
-        const handleProfileSelect = async (profile) => {
-          try {
-            // сначала локально переключаемся
-            setActiveProfileId(profile.id);
-            setNickname(profile.nickname || "Player");
-            setRam(profile.ramMb ?? defaults.ramMb);
-
-            // потом уведомляем бэк, но НЕ применяем его settings
-            await window.launcher.activateProfile(profile.id);
-
-            setStatus(`Профиль "${profile.label}" активирован.`);
-          } catch (err) {
-            setStatus("Не удалось активировать профиль: " + err.message);
-          }
-        };
-
-        const handleProfileDelete = async (profile) => {
-          const confirmed = window.confirm(
-            `Удалить профиль "${profile.label}"?`
-          );
-          if (!confirmed) return;
-
-          try {
-            const wasActive = profile.id === activeProfileId;
-            await window.launcher.deleteProfile(profile.id);
-
-            // локально правим состояние, НЕ трогаем nickname/ram
-            setProfiles((prev) => prev.filter((p) => p.id !== profile.id));
-            if (wasActive) setActiveProfileId(null);
-
-            setStatus(`Профиль "${profile.label}" удален.`);
-          } catch (err) {
-            setStatus("Не удалось удалить профиль: " + err.message);
-          }
-        };
 
         const handleModpackSelect = async (modpack) => {
           if (!modpack || modpack.id === activeModpackId) return;
@@ -1069,73 +868,7 @@
                   })}
                   {!modpacks.length && (
                     <div className="empty-state">
-                      Сборок пока нет. Нажмите «Синхронизировать моды», чтобы
-                      загрузить первую.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="sidebar-section">
-                <div className="sidebar-header">
-                  <h2>Профили</h2>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    onClick={handleAddProfile}
-                    title="Сохранить новый профиль"
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="profile-list">
-                  {profiles.map((profile, index) => {
-                    const visuals = getProfileVisuals(profile, index);
-                    return (
-                      <div
-                        key={profile.id}
-                        className={`profile-card${
-                          profile.id === activeProfileId ? " active" : ""
-                        }`}
-                      >
-                        <button
-                          className="profile-main"
-                          onClick={() => handleProfileSelect(profile)}
-                        >
-                          <div
-                            className="profile-avatar"
-                            style={{ background: visuals.gradient }}
-                          >
-                            <span
-                              className="profile-avatar-icon"
-                              aria-hidden="true"
-                            >
-                              {visuals.glyph || visuals.initial}
-                            </span>
-                          </div>
-                          <div className="profile-meta">
-                            <div className="profile-title">{profile.label}</div>
-                            <div className="profile-subtitle">
-                              {profile.nickname} · {profile.ramMb} МБ
-                            </div>
-                          </div>
-                        </button>
-                        <button
-                          className="icon-button danger"
-                          type="button"
-                          onClick={() => handleProfileDelete(profile)}
-                          title="Удалить профиль"
-                          aria-label={`Удалить профиль ${profile.label}`}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {!profiles.length && (
-                    <div className="empty-state small">
-                      Здесь появятся ваши сохраненные профили. Сохраните текущие
-                      настройки, чтобы собрать коллекцию.
+                      Сборки не найдены. Добавьте конфигурацию в конфиг.
                     </div>
                   )}
                 </div>
@@ -1158,9 +891,6 @@
                   </p>
                   <div className="user-banner-footer">
                     <span>{profileSummary}</span>
-                    <button className="ghost-button" onClick={handleAddProfile}>
-                      Сохранить текущий профиль
-                    </button>
                   </div>
                 </div>
               </section>
@@ -1340,7 +1070,7 @@
                   <label>
                     Никнейм
                     <input
-                      key={`nick-${editorKey}`}
+                      key="nick-input"
                       value={nickname}
                       onChange={(e) => setNickname(e.target.value)}
                       maxLength={32}
@@ -1351,7 +1081,7 @@
                   <label>
                     RAM (MB)
                     <input
-                      key={`ram-${editorKey}`}
+                      key="ram-input"
                       type="number"
                       value={ram}
                       min={defaults.minRamMb || 1024}
@@ -1421,84 +1151,6 @@
                 </div>
               </section>
             </main>
-
-          {profileModalOpen && (
-            <div className="modal-backdrop" role="presentation" onClick={closeProfileModal}>
-              <div
-                className="modal-card"
-                role="dialog"
-                aria-modal="true"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <header className="modal-header">
-                  <h2>Создать профиль</h2>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    onClick={closeProfileModal}
-                    aria-label="Закрыть диалог"
-                    disabled={profileModalSaving}
-                  >
-                    ×
-                  </button>
-                </header>
-                <form className="modal-body" onSubmit={handleProfileModalSubmit}>
-                  <label className="modal-field">
-                    Название профиля
-                    <input
-                      ref={profileModalLabelRef}
-                      value={profileModalLabel}
-                      onChange={(event) => setProfileModalLabel(event.target.value)}
-                      maxLength={48}
-                      placeholder="Например, Adventure Pack"
-                    />
-                  </label>
-                  <label className="modal-field">
-                    Никнейм
-                    <input
-                      value={profileModalNickname}
-                      onChange={(event) => setProfileModalNickname(event.target.value)}
-                      maxLength={32}
-                      placeholder="Player"
-                    />
-                  </label>
-                  <label className="modal-field">
-                    RAM (MB)
-                    <input
-                      type="number"
-                      value={profileModalRam}
-                      min={defaults.minRamMb || 1024}
-                      max={65536}
-                      step="256"
-                      onChange={(event) =>
-                        handleProfileModalRamChange(event.target.value)
-                      }
-                    />
-                  </label>
-                  {profileModalError && (
-                    <div className="modal-error">{profileModalError}</div>
-                  )}
-                  <footer className="modal-actions">
-                    <button
-                      type="button"
-                      className="ghost-button"
-                      onClick={closeProfileModal}
-                      disabled={profileModalSaving}
-                    >
-                      Отмена
-                    </button>
-                    <button
-                      type="submit"
-                      className="primary"
-                      disabled={profileModalSaving}
-                    >
-                      {profileModalSaving ? "Сохраняем…" : "Сохранить"}
-                    </button>
-                  </footer>
-                </form>
-              </div>
-            </div>
-          )}
         </div>
         );
       }
