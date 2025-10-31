@@ -82,7 +82,28 @@ const replaceUrlBase = (url, base) => {
   if (!pathPart) return url;
   const normalizedBase = trimTrailingSlashes(base.trim());
   if (!normalizedBase) return url;
-  return `${normalizedBase}${pathPart}`;
+  let normalizedPath = pathPart;
+
+  // When moving files into a mirror rooted at ".../meta", strip any duplicated repository prefix.
+  if (normalizedBase.toLowerCase().endsWith('/meta')) {
+    const metaMarkerIndex = pathPart.toLowerCase().indexOf('/meta/');
+    if (metaMarkerIndex >= 0) {
+      normalizedPath = pathPart.slice(metaMarkerIndex + '/meta'.length);
+      if (!normalizedPath.startsWith('/')) {
+        normalizedPath = `/${normalizedPath}`;
+      }
+    }
+  }
+
+  return `${normalizedBase}${normalizedPath}`;
+};
+
+const joinBaseAndPath = (base, path) => {
+  if (typeof base !== 'string' || typeof path !== 'string') return null;
+  const normalizedBase = trimTrailingSlashes(base.trim());
+  if (!normalizedBase) return null;
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return `${normalizedBase}${normalizedPath}`;
 };
 
 const rewriteUrlForMirror = (url, overrides) => {
@@ -97,21 +118,68 @@ const rewriteUrlForMirror = (url, overrides) => {
   const defaultBase = defaultRepoForge ? trimTrailingSlashes(defaultRepoForge) : null;
   const fallbackBase = fallbackMaven ? trimTrailingSlashes(fallbackMaven) : null;
 
-  if (metaBase && /^(https?:\/\/)?(launchermeta|piston-meta|piston-data|launcher)\.mojang\.com/i.test(target)) {
-    return replaceUrlBase(target, metaBase);
+  const pathPart = extractUrlPath(target);
+  const isBmclapiMirror = /^(https?:\/\/)?(?:.+\.)?bmclapi2\.bangbang93\.com/i.test(target);
+
+  if (metaBase) {
+    if (/^(https?:\/\/)?(launchermeta|piston-meta|piston-data|launcher)\.mojang\.com/i.test(target)) {
+      const next = joinBaseAndPath(metaBase, pathPart);
+      if (next) return next;
+    }
+    if (isBmclapiMirror && pathPart && /^\/(mc\/game|v1\/packages|v1\/objects)\b/i.test(pathPart)) {
+      const next = joinBaseAndPath(metaBase, pathPart);
+      if (next) return next;
+    }
   }
-  if (resourceBase && /^(https?:\/\/)?resources\.download\.minecraft\.net/i.test(target)) {
-    return replaceUrlBase(target, resourceBase);
+
+  if (resourceBase) {
+    if (/^(https?:\/\/)?resources\.download\.minecraft\.net/i.test(target)) {
+      const next = joinBaseAndPath(resourceBase, pathPart);
+      if (next) return next;
+    }
+    if (isBmclapiMirror && pathPart && /^\/assets\//i.test(pathPart)) {
+      const trimmedPath = pathPart.replace(/^\/assets/i, '/objects');
+      const next = joinBaseAndPath(resourceBase, trimmedPath);
+      if (next) return next;
+    }
   }
-  if (mavenBase && /^(https?:\/\/)?(files|maven)\.minecraftforge\.net/i.test(target)) {
-    return replaceUrlBase(target, mavenBase);
+
+  if (mavenBase) {
+    if (/^(https?:\/\/)?(files|maven)\.minecraftforge\.net/i.test(target)) {
+      const next = joinBaseAndPath(mavenBase, pathPart);
+      if (next) return next;
+    }
+    if (isBmclapiMirror && pathPart && /^\/maven\//i.test(pathPart)) {
+      const trimmedPath = pathPart.replace(/^\/maven/i, '');
+      const next = joinBaseAndPath(mavenBase, trimmedPath);
+      if (next) return next;
+    }
   }
-  if (defaultBase && /^(https?:\/\/)?libraries\.minecraft\.net/i.test(target)) {
-    return replaceUrlBase(target, defaultBase);
+
+  if (defaultBase) {
+    if (/^(https?:\/\/)?libraries\.minecraft\.net/i.test(target)) {
+      const next = joinBaseAndPath(defaultBase, pathPart);
+      if (next) return next;
+    }
+    if (isBmclapiMirror && pathPart && /^\/maven\//i.test(pathPart)) {
+      const trimmedPath = pathPart.replace(/^\/maven/i, '');
+      const next = joinBaseAndPath(defaultBase, trimmedPath);
+      if (next) return next;
+    }
   }
-  if (fallbackBase && /^(https?:\/\/)?search\.maven\.org/i.test(target)) {
-    return replaceUrlBase(target, fallbackBase);
+
+  if (fallbackBase) {
+    if (/^(https?:\/\/)?search\.maven\.org/i.test(target)) {
+      const next = joinBaseAndPath(fallbackBase, pathPart);
+      if (next) return next;
+    }
+    if (isBmclapiMirror && pathPart && /^\/maven\//i.test(pathPart)) {
+      const trimmedPath = pathPart.replace(/^\/maven/i, '');
+      const next = joinBaseAndPath(fallbackBase, trimmedPath);
+      if (next) return next;
+    }
   }
+
   return target;
 };
 
@@ -237,8 +305,23 @@ const fetchJsonFromMirror = async (url, label) => {
   if (!res.ok) {
     throw new Error(`Failed to fetch ${label}: ${res.status} ${res.statusText}`);
   }
+  let text;
   try {
-    return await res.json();
+    text = await res.text();
+  } catch (err) {
+    throw new Error(`Failed to read ${label}: ${err.message || err}`);
+  }
+
+  const sanitized = typeof text === 'string'
+    ? text.replace(/^\uFEFF/, '').trim()
+    : '';
+
+  if (!sanitized) {
+    throw new Error(`Failed to parse ${label}: empty response body`);
+  }
+
+  try {
+    return JSON.parse(sanitized);
   } catch (err) {
     throw new Error(`Failed to parse ${label}: ${err.message || err}`);
   }
@@ -1379,7 +1462,7 @@ const syncModsFromZip = async (modpack, zipPath, modsDir) => {
   return { copied: srcFiles.length };
 };
 
-const ensureForgeInstaller = async (forgeVersion) => {
+const ensureForgeInstaller = async (forgeVersion, overrides) => {
   const version = forgeVersion || config.FORGE_VERSION;
   if (!version) {
     throw new Error('Версия Forge не указана в конфигурации.');
@@ -1391,7 +1474,8 @@ const ensureForgeInstaller = async (forgeVersion) => {
   if (await fs.pathExists(installerPath)) return installerPath;
 
   await fs.ensureDir(FORGE_DIR);
-  const forgeUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${normalized}/${installerName}`;
+  let forgeUrl = `https://maven.minecraftforge.net/net/minecraftforge/forge/${normalized}/${installerName}`;
+  forgeUrl = normalizeForgeMirrorUrl(forgeUrl, overrides);
 
   const res = await fetch(forgeUrl);
   if (!res.ok) {
@@ -1845,7 +1929,13 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
     await ensurePath(activePaths.gameRoot);
     await ensurePath(activePaths.modsDir);
 
-    const forgeInstaller = await ensureForgeInstaller(activeModpack.forgeVersion || config.FORGE_VERSION);
+    const baseVersion = deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION);
+    const customOverrides = buildMclcOverrides();
+
+    const forgeInstaller = await ensureForgeInstaller(
+      activeModpack.forgeVersion || config.FORGE_VERSION,
+      customOverrides
+    );
     const javaArgs = [...CLEAN_JAVA_ARGS];
 
     if (sessionAuthorization && authConfig) {
@@ -1869,8 +1959,6 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       authorization.user_properties = formatUserPropertiesJson(latest.user?.properties);
     }
 
-    const baseVersion = deriveBaseVersion(activeModpack.forgeVersion || config.FORGE_VERSION);
-    const customOverrides = buildMclcOverrides();
     if (customOverrides?.url) {
       await ensureForgeVersionJsonForMirror(
         activePaths.gameRoot,

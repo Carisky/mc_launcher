@@ -66,11 +66,11 @@
   ],
   "MCLC_OVERRIDES": {
     "url": {
-      "meta": "https://bmclapi2.bangbang93.com",
-      "resource": "https://bmclapi2.bangbang93.com/assets",
-      "mavenForge": "https://bmclapi2.bangbang93.com/maven/",
-      "defaultRepoForge": "https://bmclapi2.bangbang93.com/maven/",
-      "fallbackMaven": "https://bmclapi2.bangbang93.com/maven/"
+      "meta": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/meta",
+      "resource": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/profiles/dtm/assets/objects",
+      "mavenForge": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/profiles/dtm/libraries/",
+      "defaultRepoForge": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/profiles/dtm/libraries/",
+      "fallbackMaven": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/profiles/dtm/libraries/"
     }
   },
   "DELETE_EXTRA_MODS": true
