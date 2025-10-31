@@ -46,6 +46,16 @@
       }
     }
   ],
+  "SHADERPACKS_GITHUB": {
+    "OWNER": "your-github",
+    "REPO": "shaderpacks",
+    "BRANCH": "main"
+  },
+  "RESOURCEPACKS_GITHUB": {
+    "OWNER": "your-github",
+    "REPO": "resourcepacks",
+    "BRANCH": "main"
+  },
   "SERVERS": [
     {
       "id": "main",

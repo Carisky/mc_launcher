@@ -33,6 +33,16 @@
       }
     }
   ],
+  "SHADERPACKS_GITHUB": {
+    "OWNER": "Carisky",
+    "REPO": "shaderpacks",
+    "BRANCH": "main"
+  },
+  "RESOURCEPACKS_GITHUB": {
+    "OWNER": "Carisky",
+    "REPO": "resourcepacks",
+    "BRANCH": "main"
+  },
   "SERVERS": [
     {
       "id": "main",

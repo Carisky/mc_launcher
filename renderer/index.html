@@ -73,6 +73,8 @@
           minRamMb: 1024,
         });
         const [syncing, setSyncing] = useState(false);
+        const [downloadingShaders, setDownloadingShaders] = useState(false);
+        const [downloadingResources, setDownloadingResources] = useState(false);
         const [launching, setLaunching] = useState(false);
         const [auth, setAuth] = useState({
           status: "unknown",
@@ -618,6 +620,42 @@
           }
         };
 
+        const handleDownloadShaderpacks = async () => {
+          try {
+            setDownloadingShaders(true);
+            setStatus("Downloading shader packs...");
+            const res = await window.launcher.downloadShaderpacks();
+            if (res?.ok) {
+              const count = res.copiedCount ?? (Array.isArray(res.copied) ? res.copied.length : 0);
+              setStatus(`Shader packs ready. Updated files: ${count}.`);
+            } else {
+              setStatus("Failed to download shader packs: " + (res?.error || "Unknown error"));
+            }
+          } catch (err) {
+            setStatus("Failed to download shader packs: " + err.message);
+          } finally {
+            setDownloadingShaders(false);
+          }
+        };
+
+        const handleDownloadResourcepacks = async () => {
+          try {
+            setDownloadingResources(true);
+            setStatus("Downloading resource packs...");
+            const res = await window.launcher.downloadResourcepacks();
+            if (res?.ok) {
+              const count = res.copiedCount ?? (Array.isArray(res.copied) ? res.copied.length : 0);
+              setStatus(`Resource packs ready. Updated files: ${count}.`);
+            } else {
+              setStatus("Failed to download resource packs: " + (res?.error || "Unknown error"));
+            }
+          } catch (err) {
+            setStatus("Failed to download resource packs: " + err.message);
+          } finally {
+            setDownloadingResources(false);
+          }
+        };
+
         const handleLaunch = async () => {
           try {
             setLaunching(true);
@@ -905,21 +943,151 @@
                       : "Forge 1.12.2"}
                   </p>
                 </div>
-                <div className="header-actions">
-                  <button
-                    className="action-button accent"
-                    onClick={handleSyncMods}
-                    disabled={syncing}
-                  >
-                    <span aria-hidden="true">🔄</span>
-                    {syncing ? "Синхронизируем..." : "Синхронизировать моды"}
-                  </button>
-                  <button className="action-button" onClick={handleOpenMods}>
-                    <span aria-hidden="true">📂</span>
-                    Открыть папку модов
-                  </button>
+                <div className="header-summary">
+                  <span className="header-note">
+                    Следуйте шагам ниже, чтобы подготовиться к запуску.
+                  </span>
                 </div>
               </header>
+
+              <section className="card quick-start" id="quick-start">
+                <div className="quick-start-header">
+                  <span className="step-badge">Маршрут</span>
+                  <h2>С чего начать</h2>
+                  <p className="subtitle">
+                    Выполните шаги по порядку — и вы готовы играть.
+                  </p>
+                </div>
+                <div className="quick-start-grid">
+                  <article className="quick-start-step" id="step-sync">
+                    <div className="step-header">
+                      <span className="step-index">1</span>
+                      <div>
+                        <h3>Обновите сборку</h3>
+                        <p>Синхронизируйте моды перед запуском клиента.</p>
+                      </div>
+                    </div>
+                    <div className="quick-start-actions">
+                      <button
+                        className="primary step-button"
+                        onClick={handleSyncMods}
+                        disabled={syncing}
+                      >
+                        {syncing ? "Синхронизируем..." : "Синхронизировать моды"}
+                      </button>
+                      <div className="step-secondary">
+                        <button
+                          type="button"
+                          className="step-link"
+                          onClick={handleOpenMods}
+                        >
+                          Открыть папку модов
+                        </button>
+                        <button
+                          type="button"
+                          className="step-link"
+                          onClick={handleDownloadShaderpacks}
+                          disabled={downloadingShaders}
+                        >
+                          {downloadingShaders ? "Shaderpacks загружаются..." : "Скачать Shaderpacks"}
+                        </button>
+                        <button
+                          type="button"
+                          className="step-link"
+                          onClick={handleDownloadResourcepacks}
+                          disabled={downloadingResources}
+                        >
+                          {downloadingResources ? "Resourcepacks загружаются..." : "Скачать Resourcepacks"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                  <article className="quick-start-step" id="step-server">
+                    <div className="step-header">
+                      <span className="step-index">2</span>
+                      <div>
+                        <h3>Проверьте сервер</h3>
+                        <p>Убедитесь, что сервер онлайн и принимает игроков.</p>
+                      </div>
+                    </div>
+                    <div className="quick-start-actions">
+                      <button
+                        type="button"
+                        className="step-button"
+                        onClick={handleServerStatusRefresh}
+                        disabled={
+                          !servers.length ||
+                          !canFetchServerStatus ||
+                          serversLoading
+                        }
+                      >
+                        {serversLoading ? "Обновляем статус..." : "Проверить статус"}
+                      </button>
+                      {!servers.length && (
+                        <p className="step-hint">
+                          Сборка не содержит серверов — добавьте их в конфигурацию.
+                        </p>
+                      )}
+                      {!serversLoading && !canFetchServerStatus && servers.length > 0 && (
+                        <p className="step-hint">
+                          Автообновление станет доступно после первой синхронизации.
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                  <article className="quick-start-step" id="step-launch">
+                    <div className="step-header">
+                      <span className="step-index">3</span>
+                      <div>
+                        <h3>Запустите игру</h3>
+                        <p>Нажмите «Играть сейчас», как только всё готово.</p>
+                      </div>
+                    </div>
+                    <div className="quick-start-actions">
+                      <button
+                        className="primary step-button"
+                        onClick={handleLaunch}
+                        disabled={launching}
+                      >
+                        {launching ? "Запуск..." : "Играть сейчас"}
+                      </button>
+                      <p className="step-hint status-hint">{status}</p>
+                    </div>
+                    {progress && progressPercent > 0 && (
+                      <div className="step-progress">
+                        <div className="progress">
+                          <div
+                            className="progress-bar"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                        <span className="progress-text">
+                          {progressPercent}% —{" "}
+                          {progress.type || "Выполняем задачу"}
+                        </span>
+                      </div>
+                    )}
+                    <div className="step-secondary paths">
+                      <div>
+                        <span className="paths-label">Папка игры:</span>
+                        <code>{paths.gameRoot || "—"}</code>
+                      </div>
+                      <div>
+                        <span className="paths-label">Папка модов:</span>
+                        <code>{paths.modsDir || "—"}</code>
+                      </div>
+                      <div>
+                        <span className="paths-label">Shaderpacks:</span>
+                        <code>{paths.shaderpacksDir || "—"}</code>
+                      </div>
+                      <div>
+                        <span className="paths-label">Resourcepacks:</span>
+                        <code>{paths.resourcepacksDir || "—"}</code>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+              </section>
 
               {servers.length > 0 && (
                 <section className="card server-card">
@@ -1065,7 +1233,17 @@
                 </section>
               )}
 
-              <section className="card control-card">
+              <section className="card control-card" id="player-settings">
+                <header className="card-section-header">
+                  <span className="step-badge subtle">Настройки</span>
+                  <div>
+                    <h2>Настройте клиента</h2>
+                    <p className="subtitle">
+                      Укажите ник и выделите память перед запуском.
+                    </p>
+                  </div>
+                </header>
+
                 <div className="field-grid">
                   <label>
                     Никнейм
@@ -1098,40 +1276,9 @@
                   </label>
                 </div>
 
-                <div className="actions-row">
-                  <button
-                    className="primary"
-                    onClick={handleLaunch}
-                    disabled={launching}
-                  >
-                    {launching ? "Запускаем…" : "Играть сейчас"}
-                  </button>
-                  <div className="status-line">{status}</div>
-                </div>
-
-                {progress && progressPercent > 0 && (
-                  <div className="progress">
-                    <div
-                      className="progress-bar"
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                    <span className="progress-text">
-                      {progressPercent}% ·{" "}
-                      {progress.type || "подготовка файлов"}
-                    </span>
-                  </div>
-                )}
-
-                <div className="paths">
-                  <div>
-                    <span className="paths-label">Папка игры:</span>
-                    <code>{paths.gameRoot || "—"}</code>
-                  </div>
-                  <div>
-                    <span className="paths-label">Папка модов:</span>
-                    <code>{paths.modsDir || "—"}</code>
-                  </div>
-                </div>
+                <p className="card-hint">
+                  Настройки сохраняются автоматически после синхронизации.
+                </p>
               </section>
 
               <section className="card logs-card">

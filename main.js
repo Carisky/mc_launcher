@@ -430,6 +430,9 @@ const toUpperKeys = (github = {}) => ({
   SUBDIR: github.SUBDIR || github.subdir || ''
 });
 
+const shaderpacksRepoConfig = toUpperKeys(config.SHADERPACKS_GITHUB || {});
+const resourcepacksRepoConfig = toUpperKeys(config.RESOURCEPACKS_GITHUB || {});
+
 const slugify = (value, fallback) => {
   const base = String(value || fallback || 'modpack')
     .toLowerCase()
@@ -1034,22 +1037,21 @@ let activeModpackId = userSettings.selectedModpack;
 let activeModpack = getModpackById(activeModpackId);
 
 const resolveModpackPaths = (modpack) => {
+  let gameRoot;
   if (!usePerModpackRoots) {
-    const gameRoot = BASE_GAME_ROOT;
-    return {
-      gameRoot,
-      modsDir: path.join(gameRoot, 'mods')
-    };
+    gameRoot = BASE_GAME_ROOT;
+  } else {
+    const customPath = modpack.gameRoot;
+    gameRoot = customPath
+      ? (path.isAbsolute(customPath) ? customPath : path.join(BASE_GAME_ROOT, customPath))
+      : path.join(BASE_GAME_ROOT, 'profiles', modpack.slug);
   }
 
-  const customPath = modpack.gameRoot;
-  const resolvedRoot = customPath
-    ? (path.isAbsolute(customPath) ? customPath : path.join(BASE_GAME_ROOT, customPath))
-    : path.join(BASE_GAME_ROOT, 'profiles', modpack.slug);
-
   return {
-    gameRoot: resolvedRoot,
-    modsDir: path.join(resolvedRoot, 'mods')
+    gameRoot,
+    modsDir: path.join(gameRoot, 'mods'),
+    shaderpacksDir: path.join(gameRoot, 'shaderpacks'),
+    resourcepacksDir: path.join(gameRoot, 'resourcepacks')
   };
 };
 
@@ -1061,6 +1063,8 @@ const updateActiveModpack = async (modpackId) => {
   activePaths = resolveModpackPaths(activeModpack);
   userSettings.selectedModpack = activeModpack.id;
   await ensurePath(activePaths.modsDir);
+  await ensurePath(activePaths.shaderpacksDir);
+  await ensurePath(activePaths.resourcepacksDir);
   await syncServersDat(activePaths.gameRoot, servers);
   await persistUserSettings();
 };
@@ -1349,6 +1353,8 @@ function createWindow() {
 app.whenReady().then(async () => {
   await ensurePath(BASE_GAME_ROOT);
   await ensurePath(activePaths.modsDir);
+  await ensurePath(activePaths.shaderpacksDir);
+  await ensurePath(activePaths.resourcepacksDir);
   await ensurePath(FORGE_DIR);
   await syncServersDat(activePaths.gameRoot, servers);
   createWindow();
@@ -1366,24 +1372,163 @@ app.on('activate', () => {
   }
 });
 
-const downloadModsZip = async (modpack) => {
-  const { OWNER, REPO, BRANCH } = modpack.github || {};
-  if (!OWNER || !REPO) {
-    throw new Error(`GitHub настройки не заданы для модпака "${modpack.name}"`);
+const downloadGithubRepoZip = async ({ owner, repo, branch, tempPrefix }) => {
+  if (!owner || !repo) {
+    throw new Error('GitHub repository information is incomplete.');
   }
 
-  const zipUrl = `https://codeload.github.com/${OWNER}/${REPO}/zip/refs/heads/${BRANCH}`;
-  const tmpZip = path.join(os.tmpdir(), `modpack-${modpack.id}-${Date.now()}.zip`);
+  const branchCandidates = [];
+  if (Array.isArray(branch)) {
+    branchCandidates.push(...branch.filter(Boolean));
+  } else if (branch) {
+    branchCandidates.push(branch);
+  }
+  if (!branchCandidates.length) {
+    branchCandidates.push('main');
+  }
+  if (!branchCandidates.includes('main')) {
+    branchCandidates.push('main');
+  }
+  if (!branchCandidates.includes('master')) {
+    branchCandidates.push('master');
+  }
+  const uniqueBranches = [...new Set(branchCandidates)];
+  let lastError = null;
 
-  const res = await fetch(zipUrl);
-  if (!res.ok) throw new Error(`GitHub ZIP fetch failed: ${res.status}`);
-  const fileStream = fs.createWriteStream(tmpZip);
-  await new Promise((resolve, reject) => {
-    res.body.pipe(fileStream);
-    res.body.on('error', reject);
-    fileStream.on('finish', resolve);
+  for (const candidate of uniqueBranches) {
+    const zipUrl = `https://codeload.github.com/${owner}/${repo}/zip/refs/heads/${candidate}`;
+    const tmpZip = path.join(os.tmpdir(), `${tempPrefix || `${repo}-archive`}-${candidate}-${Date.now()}.zip`);
+    try {
+      const res = await fetch(zipUrl);
+      if (!res.ok || !res.body) {
+        const statusText = res.statusText ? ` ${res.statusText}` : '';
+        throw new Error(`HTTP ${res.status}${statusText}`);
+      }
+      const stream = fs.createWriteStream(tmpZip);
+      await pipeline(res.body, stream);
+      return { zipPath: tmpZip, branch: candidate };
+    } catch (err) {
+      lastError = err;
+      if (await fs.pathExists(tmpZip)) {
+        await fs.remove(tmpZip);
+      }
+    }
+  }
+
+  throw new Error(`GitHub ZIP fetch failed: ${lastError?.message || 'Unknown error'}`);
+};
+
+const collectFilesByExtensions = async (dir, extensions) => {
+  const entries = await fs.readdir(dir);
+  const matches = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    const stat = await fs.stat(fullPath);
+    if (stat.isDirectory()) {
+      const nested = await collectFilesByExtensions(fullPath, extensions);
+      matches.push(...nested);
+    } else {
+      const lowerName = entry.toLowerCase();
+      if (extensions.some((ext) => lowerName.endsWith(ext))) {
+        matches.push(fullPath);
+      }
+    }
+  }
+  return matches;
+};
+
+const syncArchivesFromZip = async (zipPath, targetDir, options = {}) => {
+  const tempDir = path.join(os.tmpdir(), `${options.tempPrefix || 'gh-repo'}-${Date.now()}`);
+  await fs.ensureDir(tempDir);
+
+  const extensions = Array.isArray(options.extensions) && options.extensions.length
+    ? options.extensions.map((ext) => (ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`))
+    : ['.zip'];
+
+  try {
+    await extract(zipPath, { dir: tempDir });
+    const candidates = await fs.readdir(tempDir);
+    let repoRoot = null;
+    for (const candidate of candidates) {
+      const fullPath = path.join(tempDir, candidate);
+      if ((await fs.stat(fullPath)).isDirectory()) {
+        repoRoot = fullPath;
+        break;
+      }
+    }
+    if (!repoRoot) {
+      throw new Error('Unexpected GitHub archive structure.');
+    }
+
+    const files = await collectFilesByExtensions(repoRoot, extensions);
+    if (!files.length) {
+      const kindLabel = options.kind || 'matching';
+      throw new Error(`No ${kindLabel} files found in repository archive.`);
+    }
+
+    await fs.ensureDir(targetDir);
+    const copied = [];
+    for (const sourcePath of files) {
+      const fileName = path.basename(sourcePath);
+      await fs.copy(sourcePath, path.join(targetDir, fileName), { overwrite: true });
+      copied.push(fileName);
+    }
+
+    let deleted = 0;
+    if (options.deleteExtra) {
+      const copiedSet = new Set(copied.map((name) => name.toLowerCase()));
+      const existing = await fs.readdir(targetDir);
+      const toDelete = existing.filter((name) => {
+        const lower = name.toLowerCase();
+        if (!extensions.some((ext) => lower.endsWith(ext))) {
+          return false;
+        }
+        return !copiedSet.has(lower);
+      });
+      for (const name of toDelete) {
+        await fs.remove(path.join(targetDir, name));
+        deleted += 1;
+      }
+    }
+
+    return { copied, copiedCount: copied.length, deleted };
+  } finally {
+    await fs.remove(tempDir);
+  }
+};
+
+const syncPackArchivesFromRepo = async (repoConfig, targetDir, options = {}) => {
+  if (!repoConfig || !repoConfig.OWNER || !repoConfig.REPO) {
+    throw new Error(options.missingMessage || 'GitHub repository is not configured.');
+  }
+  await ensurePath(targetDir);
+  const { zipPath } = await downloadGithubRepoZip({
+    owner: repoConfig.OWNER,
+    repo: repoConfig.REPO,
+    branch: repoConfig.BRANCH,
+    tempPrefix: options.tempPrefix || repoConfig.REPO
   });
-  return tmpZip;
+  try {
+    return await syncArchivesFromZip(zipPath, targetDir, options);
+  } finally {
+    await fs.remove(zipPath);
+  }
+};
+
+const downloadModsZip = async (modpack) => {
+  const repo = toUpperKeys(modpack.github || {});
+  if (!repo.OWNER || !repo.REPO) {
+    throw new Error(`GitHub ??????? ?? ?????? ??? ??????? "${modpack.name}"`);
+  }
+
+  const { zipPath } = await downloadGithubRepoZip({
+    owner: repo.OWNER,
+    repo: repo.REPO,
+    branch: repo.BRANCH,
+    tempPrefix: `modpack-${modpack.id || repo.REPO}`
+  });
+
+  return zipPath;
 };
 
 const syncModsFromZip = async (modpack, zipPath, modsDir) => {
@@ -1784,6 +1929,40 @@ ipcMain.handle('mods:sync', async () => {
   }
 });
 
+ipcMain.handle('packs:downloadShaderpacks', async () => {
+  if (!shaderpacksRepoConfig.OWNER || !shaderpacksRepoConfig.REPO) {
+    return { ok: false, error: 'Shaderpacks repository is not configured.' };
+  }
+
+  try {
+    const result = await syncPackArchivesFromRepo(shaderpacksRepoConfig, activePaths.shaderpacksDir, {
+      extensions: ['.zip'],
+      kind: 'shader pack',
+      tempPrefix: 'shaderpacks'
+    });
+    return { ok: true, ...result, targetDir: activePaths.shaderpacksDir };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('packs:downloadResourcepacks', async () => {
+  if (!resourcepacksRepoConfig.OWNER || !resourcepacksRepoConfig.REPO) {
+    return { ok: false, error: 'Resource packs repository is not configured.' };
+  }
+
+  try {
+    const result = await syncPackArchivesFromRepo(resourcepacksRepoConfig, activePaths.resourcepacksDir, {
+      extensions: ['.zip'],
+      kind: 'resource pack',
+      tempPrefix: 'resourcepacks'
+    });
+    return { ok: true, ...result, targetDir: activePaths.resourcepacksDir };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('server:status', async (_event, serverId) => {
   const server = getServerById(serverId);
   if (!server) {
@@ -1821,6 +2000,7 @@ ipcMain.handle('server:status', async (_event, serverId) => {
 
 ipcMain.handle('mc:launch', async (event, payload = {}) => {
   let windowHiddenForLaunch = false;
+  let scheduleWindowRestore = null;
   const restoreWindowVisibility = () => {
     if (!windowHiddenForLaunch) {
       return;
@@ -1959,7 +2139,12 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       opts.overrides = overridesForLaunch;
     }
 
-    launcher.on('close', restoreWindowVisibility);
+    scheduleWindowRestore = () => {
+      launcher.removeListener('close', scheduleWindowRestore);
+      restoreWindowVisibility();
+    };
+
+    launcher.on('close', scheduleWindowRestore);
 
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.hide();
@@ -1971,10 +2156,13 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
     launcher.on('progress', (p) => event.sender.send('mc:progress', p));
 
     await launcher.launch(opts);
-    restoreWindowVisibility();
     return { ok: true };
   } catch (err) {
-    restoreWindowVisibility();
+    if (typeof scheduleWindowRestore === 'function') {
+      scheduleWindowRestore();
+    } else {
+      restoreWindowVisibility();
+    }
     dialog.showErrorBox('MC Launch error', String(err));
     return { ok: false, error: String(err) };
   }
