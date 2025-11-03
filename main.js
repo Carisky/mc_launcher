@@ -2079,7 +2079,8 @@ ipcMain.handle('mc:launch', async (event, payload = {}) => {
       if (!injectorPath) {
         throw new Error('authlib-injector is not available.');
       }
-      javaArgs.push(`-javaagent:${injectorPath}=${authConfig.baseUrl}`);
+      const injectorEndpoint = `${authConfig.baseUrl}/authlib-injector`;
+      javaArgs.push(`-javaagent:${injectorPath}=${injectorEndpoint}`);
     }
 
     const authorization = sessionAuthorization || {
