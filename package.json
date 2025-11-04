@@ -1,8 +1,8 @@
 {
   "name": "mc-launcher",
-  "version": "1.0.1",
+  "version": "1.0.9",
   "main": "main.js",
-  "description": "Custom Minecraft Launcher with modpack sync and offline login.",
+  "description": "Yolka launcher for minecraft",
   "author": "Custom Launcher Team",
   "type": "commonjs",
   "scripts": {

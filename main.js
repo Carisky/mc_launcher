@@ -21,6 +21,131 @@ const config = JSON.parse(configRaw);
 
 let mainWindow = null;
 
+const UPDATE_SCRIPT_PREFIX = 'mc-launcher-updater-';
+const UPDATE_LOG_PATH = path.join(os.tmpdir(), 'mc-launcher-update.log');
+
+const writeUpdateScript = async (scriptPath) => {
+  const script = `'use strict';
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+const waitForExit = async (pid, timeoutMs = 120000) => {
+  if (!pid || Number.isNaN(pid) || pid <= 0) return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if (!err || err.code === 'ESRCH' || err.code === 'EPERM') return;
+      throw err;
+    }
+    await sleep(200);
+  }
+  throw new Error('Timed out waiting for process ' + pid);
+};
+
+const appendLog = async (message) => {
+  try {
+    await fs.promises.appendFile(${JSON.stringify(UPDATE_LOG_PATH)}, new Date().toISOString() + ' - ' + message + '\\n', 'utf8');
+  } catch {}
+};
+
+const removeIfExists = async (target) => {
+  if (!target) return;
+  try {
+    await fs.promises.unlink(target);
+  } catch (err) {
+    if (!err || err.code === 'ENOENT') return;
+    throw err;
+  }
+};
+
+(async () => {
+  const downloadPath = path.resolve(process.argv[2] || '');
+  const targetPath = path.resolve(process.argv[3] || '');
+  const parentPid = Number(process.argv[4] || 0);
+
+  if (!downloadPath || !targetPath) {
+    throw new Error('Updater: missing download or target path.');
+  }
+
+  await appendLog('Updater started. parentPid=' + parentPid + ', downloadPath=' + downloadPath);
+  await waitForExit(parentPid);
+  await appendLog('Parent exited');
+
+  await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    try {
+      await removeIfExists(targetPath);
+      await fs.promises.rename(downloadPath, targetPath);
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (err && err.code === 'EXDEV') {
+        try {
+          await fs.promises.copyFile(downloadPath, targetPath);
+          await removeIfExists(downloadPath);
+          lastError = null;
+          break;
+        } catch (copyErr) {
+          lastError = copyErr;
+        }
+      }
+      await sleep(500);
+    }
+  }
+
+  if (lastError) {
+    await appendLog('Failed to apply update: ' + (lastError.stack || lastError));
+    throw lastError;
+  }
+
+  try {
+    await fs.promises.chmod(targetPath, 0o755);
+  } catch {}
+
+  await appendLog('Update applied, relaunching');
+
+  try {
+    const child = spawn(targetPath, [], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: path.dirname(targetPath)
+    });
+    child.unref();
+  } catch (err) {
+    await appendLog('Failed to relaunch: ' + (err.stack || err));
+  }
+
+  try {
+    await removeIfExists(process.argv[1]);
+  } catch {}
+
+  await appendLog('Updater finished');
+})().catch(async (err) => {
+  await appendLog('Updater error: ' + (err && err.stack ? err.stack : err));
+  process.exit(1);
+});
+`;
+
+  await fs.promises.writeFile(scriptPath, script, 'utf8');
+};
+
+const createUpdateScript = async () => {
+  const scriptPath = path.join(
+    os.tmpdir(),
+    `${UPDATE_SCRIPT_PREFIX}${Date.now()}-${Math.random().toString(16).slice(2)}.cjs`
+  );
+  await writeUpdateScript(scriptPath);
+  return scriptPath;
+};
+
 const SUPPRESSED_EXCEPTION_CODES = new Set(['ECONNRESET']);
 
 const shouldSuppressMainProcessException = (error) => {
@@ -285,64 +410,62 @@ const getLatestUpdateInfo = async (force = false) => {
   return updateCheckPromise;
 };
 
-const scheduleUpdateReplacement = async (downloadPath) => {
+const resolveUpdateTargetPath = () => {
+  const portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE;
+  if (portableExecutable && typeof portableExecutable === 'string') {
+    try {
+      const normalized = path.resolve(portableExecutable);
+      if (fs.existsSync(normalized)) {
+        return normalized;
+      }
+      const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+      if (portableDir && typeof portableDir === 'string') {
+        const combined = path.resolve(portableDir, path.basename(portableExecutable));
+        if (fs.existsSync(combined)) {
+          return combined;
+        }
+      }
+    } catch (err) {
+      console.warn('[updates] Failed to resolve portable executable path:', err);
+    }
+  }
+
+  return process.execPath;
+};
+
+const scheduleUpdateReplacement = async (downloadPath, targetPath) => {
   if (!downloadPath) {
     throw new Error('Update payload path is missing.');
   }
 
-  const scriptPath = path.join(
-    os.tmpdir(),
-    `mc-launcher-update-${Date.now()}-${Math.random().toString(16).slice(2)}.ps1`
-  );
+  const resolvedTarget = targetPath || resolveUpdateTargetPath();
+  if (!resolvedTarget) {
+    throw new Error('Unable to resolve target executable path.');
+  }
 
-  const scriptContent = [
-    'param(',
-    '  [Parameter(Mandatory=$true)][string]$SourcePath,',
-    '  [Parameter(Mandatory=$true)][string]$TargetPath,',
-    '  [Parameter(Mandatory=$true)][int]$ProcessId',
-    ')',
-    '$attempts = 0',
-    'while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {',
-    '  Start-Sleep -Milliseconds 200',
-    '}',
-    'while ($attempts -lt 120) {',
-    '  try {',
-    '    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force',
-    '    Remove-Item -LiteralPath $SourcePath -Force -ErrorAction SilentlyContinue',
-    '    Start-Process -FilePath $TargetPath',
-    '    break',
-    '  } catch {',
-    '    Start-Sleep -Milliseconds 500',
-    '    $attempts++',
-    '  }',
-    '}',
-    'Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue'
-  ].join('\r\n');
+  const targetDir = path.dirname(resolvedTarget);
+  if (!(await fs.pathExists(targetDir))) {
+    throw new Error(`Target directory "${targetDir}" doesn't exist.`);
+  }
 
-  await fs.promises.writeFile(scriptPath, scriptContent, 'utf8');
-
-  const args = [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath,
-    '-SourcePath',
-    downloadPath,
-    '-TargetPath',
-    process.execPath,
-    '-ProcessId',
-    String(process.pid)
-  ];
+  const scriptPath = await createUpdateScript();
+  const args = [scriptPath, downloadPath, resolvedTarget, String(process.pid)];
+  const env = {
+    ...process.env,
+    ELECTRON_RUN_AS_NODE: '1',
+    ELECTRON_NO_ATTACH_CONSOLE: '1'
+  };
 
   try {
-    const updater = spawn('powershell.exe', args, {
+    const updater = spawn(process.execPath, args, {
       detached: true,
-      stdio: 'ignore'
+      stdio: 'ignore',
+      cwd: targetDir,
+      env
     });
     updater.unref();
   } catch (err) {
-    throw new Error(`Failed to launch updater script: ${err.message || err}`);
+    throw new Error(`Failed to launch updater helper: ${err.message || err}`);
   }
 
   setTimeout(() => {
@@ -361,6 +484,7 @@ const downloadAndApplyUpdate = async (info) => {
     throw new Error('An update is already being downloaded.');
   }
 
+  const targetPath = resolveUpdateTargetPath();
   const controller = new AbortController();
   const tempPath = path.join(
     os.tmpdir(),
@@ -418,7 +542,7 @@ const downloadAndApplyUpdate = async (info) => {
       totalBytes
     });
 
-    await scheduleUpdateReplacement(tempPath);
+    await scheduleUpdateReplacement(tempPath, targetPath);
     scheduled = true;
     sendUpdateEvent({ type: 'status', status: 'restarting' });
   } catch (err) {

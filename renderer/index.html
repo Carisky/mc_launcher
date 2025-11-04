@@ -1141,7 +1141,7 @@
         } else if (updateState.status === "error") {
           updateStatusText =
             updateState.error ||
-            "Не удалось проверить обновления. Повторите попытку.";
+            "Не удалось проверить обновления -_- \n Повторите попытку.";
         }
 
         return (
@@ -1248,8 +1248,8 @@
                             loginUsername ||
                             "Player"}
                         </span>
-                        {auth.baseUrl && (
-                          <span className="auth-base">{auth.baseUrl}</span>
+                        {auth.status === "authenticated" && (
+                          <span className="auth-base">Authorized ^_^</span>
                         )}
                       </div>
                       <div className="auth-actions">
