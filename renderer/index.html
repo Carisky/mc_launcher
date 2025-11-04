@@ -269,11 +269,11 @@
       fireflyConfig?.color && typeof fireflyConfig.color === "string"
         ? fireflyConfig.color.trim()
         : "rgba(255, 244, 214, 0.85)";
-    const fireflySize = clamp(
-      fireflyConfig?.size ? Number(fireflyConfig.size) : 320,
-      140,
-      520
-    );
+    const rawSize =
+      fireflyConfig?.size !== undefined
+        ? Number(fireflyConfig.size)
+        : 120;
+    const fireflySize = clamp(rawSize, 60, 320);
 
     let resolvedImage = imageSrc;
     if (hasImage) {

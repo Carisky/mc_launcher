@@ -35,7 +35,7 @@
     "blurRadius": 28,
     "firefly": {
       "color": "rgba(255, 244, 214, 0.85)",
-      "size": 320,
+      "size": 120,
       "speed": 1
     }
   },

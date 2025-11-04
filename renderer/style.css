@@ -893,12 +893,12 @@ body {
 
 .main-area-firefly {
   position: absolute;
-  width: var(--firefly-size, 320px);
-  height: var(--firefly-size, 320px);
+  width: var(--firefly-size, 180px);
+  height: var(--firefly-size, 180px);
   border-radius: 999px;
   pointer-events: none;
   mix-blend-mode: screen;
-  opacity: 0.45;
+  opacity: 0.62;
   animation: blumPulse 8s ease-in-out infinite alternate;
   will-change: transform, opacity;
 }
@@ -908,11 +908,11 @@ body {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.25) 40%, rgba(12, 12, 26, 0) 74%);
-  box-shadow: 0 0 140px 42px var(--firefly-color, rgba(255, 244, 214, 0.6));
-  opacity: 0.85;
-  transform: scale(0.92);
-  filter: blur(4px);
+  background: radial-gradient(circle at 45% 30%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.35) 38%, rgba(18, 16, 32, 0) 70%);
+  box-shadow: 0 0 90px 26px var(--firefly-color, rgba(255, 244, 214, 0.9));
+  opacity: 0.95;
+  transform: scale(0.88);
+  filter: blur(3px);
   animation: blumGlow 7.2s ease-in-out infinite alternate;
 }
 
