@@ -1,6 +1,6 @@
 {
   "name": "mc-launcher",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "main.js",
   "description": "Custom Minecraft Launcher with modpack sync and offline login.",
   "author": "Custom Launcher Team",
@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win --x64",
-    "build:portable": "electron-builder --win portable --x64"
+    "build:portable": "electron-builder --win portable --x64",
+    "build:portable-remote-push": "node ./scripts/buildPortableRemotePush.js"
   },
   "dependencies": {
     "extract-zip": "^2.0.1",

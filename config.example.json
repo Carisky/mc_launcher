@@ -18,6 +18,16 @@
       "sha256": "6DFF7951C41D61EBA78F9B034BE610ADE0E80D3309300742057D1866375D0427"
     }
   },
+  "APP_UPDATES": {
+    "ENABLED": true,
+    "ENFORCE": true,
+    "CHANNEL": "stable",
+    "github": {
+      "OWNER": "your-github",
+      "REPO": "mc-launcher-distro",
+      "ASSET_NAME": "Compass MC Launcher Portable.exe"
+    }
+  },
   "MODPACKS": [
     {
       "id": "dtm",
@@ -74,6 +84,7 @@
       }
     }
   ],
+  
   "MCLC_OVERRIDES": {
     "url": {
       "meta": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/meta",

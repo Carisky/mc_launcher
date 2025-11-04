@@ -1,4 +1,4 @@
-﻿{
+{
   "GAME_ROOT": "./runtime",
   "FORGE_VERSION": "1.12.2-forge-14.23.5.2860",
   "DEFAULT_RAM_MB": 8192,
@@ -16,6 +16,16 @@
       "version": "1.2.6",
       "downloadUrl": "https://github.com/yushijinhun/authlib-injector/releases/download/v1.2.6/authlib-injector-1.2.6.jar",
       "sha256": "6DFF7951C41D61EBA78F9B034BE610ADE0E80D3309300742057D1866375D0427"
+    }
+  },
+  "APP_UPDATES": {
+    "ENABLED": true,
+    "ENFORCE": true,
+    "CHANNEL": "stable",
+    "github": {
+      "OWNER": "Carisky",
+      "REPO": "mc_launcher",
+      "ASSET_NAME": "Compass MC Launcher Portable.exe"
     }
   },
   "MODPACKS": [
@@ -70,5 +80,6 @@
       "fallbackMaven": "https://raw.githubusercontent.com/Carisky/mc_launcher_runtime/main/profiles/dtm/libraries/"
     }
   },
+  
   "DELETE_EXTRA_MODS": true
 }

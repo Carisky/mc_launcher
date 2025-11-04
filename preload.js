@@ -17,6 +17,13 @@ contextBridge.exposeInMainWorld('launcher', {
   downloadResourcepacks: () => invoke('packs:downloadResourcepacks'),
   fetchServerStatus: (serverId) => invoke('server:status', serverId),
   launch: (payload) => invoke('mc:launch', payload),
+  refreshUpdate: () => invoke('app:update:refresh'),
+  startUpdateDownload: () => invoke('app:update:start'),
+  onUpdate: (cb) => {
+    const handler = (_event, payload) => cb(payload);
+    ipcRenderer.on('app:update:event', handler);
+    return () => ipcRenderer.removeListener('app:update:event', handler);
+  },
   onLog: (cb) => ipcRenderer.on('mc:log', (_, msg) => cb(msg)),
   onProgress: (cb) => ipcRenderer.on('mc:progress', (_, p) => cb(p))
 });

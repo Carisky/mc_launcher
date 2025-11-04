@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -175,6 +175,23 @@
         const [downloadingShaders, setDownloadingShaders] = useState(false);
         const [downloadingResources, setDownloadingResources] = useState(false);
         const [launching, setLaunching] = useState(false);
+        const [updateState, setUpdateState] = useState({
+          enabled: false,
+          status: "checking",
+          needsUpdate: false,
+          mandatory: false,
+          currentVersion: null,
+          latestVersion: null,
+          releaseNotes: "",
+          releaseTag: null,
+          error: null,
+          downloading: false,
+          progressPercent: 0,
+          downloadedBytes: 0,
+          totalBytes: 0,
+          stage: "idle",
+          actionError: null
+        });
         const [auth, setAuth] = useState({
           status: "unknown",
           allowRegistration: false,
@@ -305,6 +322,170 @@
           applyAuthState(nextSettings.auth || null);
         };
 
+        const applyUpdateSnapshot = useCallback((snapshot) => {
+          if (!snapshot) return;
+          setUpdateState((prev) => {
+            const nextStage = snapshot.needsUpdate
+              ? prev.stage === "downloading" || prev.stage === "restarting"
+                ? prev.stage
+                : "pending"
+              : "idle";
+            const resetProgress = !snapshot.needsUpdate;
+            return {
+              ...prev,
+              enabled: Boolean(snapshot.enabled),
+              status: snapshot.status || "unknown",
+              needsUpdate: Boolean(snapshot.needsUpdate),
+              mandatory: Boolean(snapshot.mandatory),
+              currentVersion:
+                snapshot.currentVersion ||
+                snapshot.current_version ||
+                prev.currentVersion,
+              latestVersion:
+                snapshot.latestVersion ||
+                snapshot.latest_version ||
+                prev.latestVersion,
+              releaseNotes: snapshot.releaseNotes || snapshot.release_notes || "",
+              releaseTag: snapshot.releaseTag || snapshot.release_tag || null,
+              error: snapshot.error || null,
+              stage: nextStage,
+              downloading: nextStage === "downloading",
+              progressPercent: resetProgress ? 0 : prev.progressPercent,
+              downloadedBytes: resetProgress ? 0 : prev.downloadedBytes,
+              totalBytes: resetProgress ? 0 : prev.totalBytes,
+              actionError: snapshot.needsUpdate ? prev.actionError : null
+            };
+          });
+        }, []);
+
+        const handleUpdateEvent = useCallback(
+          (payload) => {
+            if (!payload || typeof payload !== "object") return;
+            if (payload.type === "state") {
+              applyUpdateSnapshot(payload.state);
+              return;
+            }
+            if (payload.type === "progress") {
+              setUpdateState((prev) => ({
+                ...prev,
+                stage: "downloading",
+                downloading: true,
+                progressPercent:
+                  typeof payload.percent === "number"
+                    ? Math.max(0, Math.min(100, payload.percent))
+                    : prev.progressPercent,
+                downloadedBytes:
+                  typeof payload.downloadedBytes === "number"
+                    ? payload.downloadedBytes
+                    : prev.downloadedBytes,
+                totalBytes:
+                  typeof payload.totalBytes === "number"
+                    ? payload.totalBytes
+                    : prev.totalBytes
+              }));
+              return;
+            }
+            if (payload.type === "status") {
+              const status = payload.status;
+              if (status === "downloading") {
+                setUpdateState((prev) => ({
+                  ...prev,
+                  downloading: true,
+                  stage: "downloading",
+                  progressPercent: 0,
+                  downloadedBytes: 0,
+                  totalBytes: 0,
+                  actionError: null
+                }));
+                return;
+              }
+              if (status === "downloaded") {
+                setUpdateState((prev) => ({
+                  ...prev,
+                  downloading: false,
+                  stage: "downloaded",
+                  progressPercent: 100,
+                  downloadedBytes:
+                    typeof payload.downloadedBytes === "number"
+                      ? payload.downloadedBytes
+                      : prev.downloadedBytes,
+                  totalBytes:
+                    typeof payload.totalBytes === "number"
+                      ? payload.totalBytes
+                      : prev.totalBytes
+                }));
+                return;
+              }
+              if (status === "restarting") {
+                setUpdateState((prev) => ({
+                  ...prev,
+                  downloading: false,
+                  stage: "restarting"
+                }));
+                return;
+              }
+              if (status === "error") {
+                setUpdateState((prev) => ({
+                  ...prev,
+                  downloading: false,
+                  stage: "error",
+                  actionError:
+                    payload.error ||
+                    prev.actionError ||
+                    "Не удалось скачать обновление."
+                }));
+              }
+            }
+          },
+          [applyUpdateSnapshot]
+        );
+
+        const handleStartUpdate = useCallback(async () => {
+          if (typeof window.launcher?.startUpdateDownload !== "function") return;
+          setUpdateState((prev) => ({
+            ...prev,
+            downloading: true,
+            stage: "downloading",
+            progressPercent: 0,
+            downloadedBytes: 0,
+            totalBytes: 0,
+            actionError: null
+          }));
+          try {
+            const result = await window.launcher.startUpdateDownload();
+            if (!result?.ok) {
+              throw new Error(result?.error || "Не удалось запустить обновление.");
+            }
+          } catch (err) {
+            setUpdateState((prev) => ({
+              ...prev,
+              downloading: false,
+              stage: "error",
+              actionError: err.message || "Не удалось запустить обновление."
+            }));
+          }
+        }, []);
+
+        const handleUpdateRetry = useCallback(async () => {
+          if (typeof window.launcher?.refreshUpdate !== "function") return;
+          setUpdateState((prev) => ({
+            ...prev,
+            stage: "pending",
+            actionError: null,
+            status: "checking"
+          }));
+          try {
+            const info = await window.launcher.refreshUpdate();
+            applyUpdateSnapshot(info);
+          } catch (err) {
+            setUpdateState((prev) => ({
+              ...prev,
+              stage: "error",
+              actionError: err.message || "Не удалось проверить обновления."
+            }));
+          }
+        }, [applyUpdateSnapshot]);
+
         const getServerDisplayAddress = useCallback((entry) => {
           if (!entry) return "-";
           if (entry.displayAddress) return entry.displayAddress;
@@ -341,6 +522,19 @@
             return `${online} / ${max}`;
           }
           return `${online}`;
+        };
+
+        const formatBytes = (value) => {
+          if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+          const units = ["B", "KB", "MB", "GB"];
+          let size = value;
+          let index = 0;
+          while (size >= 1024 && index < units.length - 1) {
+            size /= 1024;
+            index += 1;
+          }
+          const rounded = size >= 100 ? Math.round(size) : Math.round(size * 10) / 10;
+          return `${rounded} ${units[index]}`;
         };
 
         const handleAuthLogin = useCallback(
@@ -587,6 +781,15 @@
               );
               applySettings(settings);
               applyAuthState(bootstrap.auth || settings.auth || null);
+              if (bootstrap.update) {
+                applyUpdateSnapshot(bootstrap.update);
+              } else {
+                applyUpdateSnapshot({
+                  enabled: false,
+                  status: "disabled",
+                  needsUpdate: false
+                });
+              }
               const initialLoginName =
                 bootstrap.auth?.selectedProfile?.name ||
                 bootstrap.auth?.user?.username ||
@@ -603,7 +806,7 @@
               setStatus("Ошибка инициализации: " + err.message);
             }
           })();
-        }, []);
+        }, [applyUpdateSnapshot]);
 
         useEffect(() => {
           window.launcher.onLog((msg) => {
@@ -616,6 +819,16 @@
             setProgress(payload);
           });
         }, []);
+
+        useEffect(() => {
+          if (typeof window.launcher?.onUpdate !== "function") return;
+          const dispose = window.launcher.onUpdate(handleUpdateEvent);
+          return () => {
+            if (typeof dispose === "function") {
+              dispose();
+            }
+          };
+        }, [handleUpdateEvent]);
 
         useEffect(() => {
           Object.values(serverTimersRef.current || {}).forEach((timer) =>
@@ -890,6 +1103,47 @@
             ? Math.round((progress.task.progress / progress.task.total) * 100)
             : 0;
 
+        const updatePercent = Math.max(
+          0,
+          Math.min(
+            100,
+            typeof updateState.progressPercent === "number"
+              ? updateState.progressPercent
+              : 0
+          )
+        );
+        const downloadedText = formatBytes(updateState.downloadedBytes);
+        const totalText = formatBytes(updateState.totalBytes);
+        const shouldShowUpdateOverlay =
+          updateState.enabled &&
+          (updateState.needsUpdate ||
+            updateState.stage === "downloading" ||
+            updateState.stage === "downloaded" ||
+            updateState.stage === "restarting" ||
+            updateState.stage === "error");
+        const updateButtonDisabled =
+          updateState.downloading || updateState.stage === "restarting";
+        const showRetryButton =
+          !updateState.downloading &&
+          (updateState.stage === "error" || updateState.status === "error");
+        let updateStatusText = "Доступна новая версия лаунчера.";
+        if (updateState.stage === "downloading") {
+          updateStatusText = "Скачиваем обновление...";
+        } else if (updateState.stage === "downloaded") {
+          updateStatusText = "Загрузка завершена. Подготовка к установке.";
+        } else if (updateState.stage === "restarting") {
+          updateStatusText =
+            "Перезапускаем лаунчер, чтобы завершить установку.";
+        } else if (updateState.stage === "error") {
+          updateStatusText =
+            updateState.actionError ||
+            "Не удалось скачать обновление. Попробуйте еще раз.";
+        } else if (updateState.status === "error") {
+          updateStatusText =
+            updateState.error ||
+            "Не удалось проверить обновления. Повторите попытку.";
+        }
+
         return (
           <div className="app-shell">
             {!bootstrapped && (
@@ -899,6 +1153,81 @@
               </div>
             )}
 
+            {shouldShowUpdateOverlay && (
+              <div className="update-overlay">
+                <div className="update-panel">
+                  <h2>Обновись на новую версию</h2>
+                  <p>
+                    Доступна новая версия лаунчера.
+                    {updateState.currentVersion && updateState.latestVersion
+                      ? ` Сейчас установлена ${updateState.currentVersion}, новая версия — ${updateState.latestVersion}.`
+                      : ""}
+                  </p>
+                  <div className="update-meta">
+                    {updateState.currentVersion && (
+                      <span>
+                        Текущая версия:{" "}
+                        <strong>{updateState.currentVersion}</strong>
+                      </span>
+                    )}
+                    {updateState.latestVersion && (
+                      <span>
+                        Новая версия:{" "}
+                        <strong>{updateState.latestVersion}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <p>{updateStatusText}</p>
+                  {(updateState.stage === "downloading" ||
+                    updateState.stage === "downloaded") && (
+                    <div className="update-progress">
+                      <div className="update-progress-bar">
+                        <div
+                          className="update-progress-fill"
+                          style={{ width: `${updatePercent}%` }}
+                        />
+                      </div>
+                      <span>
+                        {updatePercent}%
+                        {downloadedText ? ` - ${downloadedText}` : ""}
+                        {totalText ? ` / ${totalText}` : ""}
+                      </span>
+                    </div>
+                  )}
+                  {updateState.stage === "error" && updateState.actionError && (
+                    <div className="update-error">{updateState.actionError}</div>
+                  )}
+                  {updateState.releaseNotes &&
+                    updateState.releaseNotes.trim() && (
+                      <div className="update-notes">
+                        {updateState.releaseNotes}
+                      </div>
+                    )}
+                  <div className="update-actions">
+                    <button
+                      type="button"
+                      onClick={handleStartUpdate}
+                      disabled={updateButtonDisabled}
+                    >
+                      {updateState.stage === "downloading"
+                        ? "Загрузка..."
+                        : updateState.stage === "restarting"
+                        ? "Перезапуск..."
+                        : "Обновить"}
+                    </button>
+                    {showRetryButton && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={handleUpdateRetry}
+                      >
+                        Повторить проверку
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <aside className="sidebar">
               <div className="brand">
                 <span className="brand-accent">Custom</span>
@@ -1384,7 +1713,7 @@
                       <span className="settings-tag">Настройки</span>
                       <h2 id="settings-title">Профиль и память</h2>
                       <p className="settings-subtitle">
-                        Задайте ник и объём оперативной памяти для выбранной сборки.
+                        Выбирайте ник и объём оперативной памяти Рґля выбранной сборки.
                       </p>
                     </div>
                     <button
@@ -1414,7 +1743,7 @@
                         onBlur={commitRamValue}
                       />
                       <span className="hint">
-                        Минимум {defaults.minRamMb || 1024} МБ. Рекомендуем от {Math.max(defaults.ramMb, defaults.minRamMb)} МБ.
+                        Минимум {defaults.minRamMb || 1024} МБ. Рекомендуемо от {Math.max(defaults.ramMb, defaults.minRamMb)} МБ.
                       </span>
                     </label>
                   </div>
@@ -1433,3 +1762,7 @@
     </script>
   </body>
 </html>
+
+
+
+

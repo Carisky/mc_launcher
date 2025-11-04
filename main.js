@@ -6,6 +6,7 @@ const extract = require('extract-zip');
 const crypto = require('crypto');
 const os = require('os');
 const { pipeline } = require('stream/promises');
+const { spawn } = require('child_process');
 const { Client } = require('minecraft-launcher-core');
 const MCLCHandler = require('minecraft-launcher-core/components/handler');
 const { Rcon } = require('rcon-client');
@@ -19,6 +20,427 @@ const configRaw = fs.readFileSync(CONFIG_PATH, 'utf8').replace(/^\uFEFF/, '');
 const config = JSON.parse(configRaw);
 
 let mainWindow = null;
+
+const SUPPRESSED_EXCEPTION_CODES = new Set(['ECONNRESET']);
+
+const shouldSuppressMainProcessException = (error) => {
+  if (!error) return false;
+  if (error.code && SUPPRESSED_EXCEPTION_CODES.has(error.code)) {
+    return true;
+  }
+  const message = typeof error.message === 'string' ? error.message : '';
+  if (!message) return false;
+  const upper = message.toUpperCase();
+  for (const code of SUPPRESSED_EXCEPTION_CODES) {
+    if (upper.includes(code)) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const uncaughtExceptionHandler = (error) => {
+  if (shouldSuppressMainProcessException(error)) {
+    console.warn('[main] Suppressed uncaught exception:', error);
+    return;
+  }
+  process.removeListener('uncaughtException', uncaughtExceptionHandler);
+  throw error;
+};
+
+process.on('uncaughtException', uncaughtExceptionHandler);
+
+const parseBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
+};
+
+const normalizeUpdateConfig = (raw = {}) => {
+  const source = raw || {};
+  const github = source.github || source.GITHUB || {};
+  const owner =
+    process.env.APP_UPDATE_OWNER ||
+    github.OWNER ||
+    github.owner ||
+    process.env.RELEASE_OWNER ||
+    null;
+  const repo =
+    process.env.APP_UPDATE_REPO ||
+    github.REPO ||
+    github.repo ||
+    process.env.RELEASE_REPO ||
+    null;
+  const assetName =
+    process.env.APP_UPDATE_ASSET ||
+    process.env.APP_UPDATE_ASSET_NAME ||
+    github.ASSET_NAME ||
+    github.assetName ||
+    null;
+  const enabled = parseBoolean(
+    process.env.APP_UPDATES_ENABLED,
+    source.ENABLED !== undefined ? parseBoolean(source.ENABLED, true) : true
+  );
+  const enforce = parseBoolean(
+    process.env.APP_UPDATES_ENFORCE,
+    source.ENFORCE !== undefined ? parseBoolean(source.ENFORCE, true) : true
+  );
+  const channel = process.env.APP_UPDATES_CHANNEL || source.CHANNEL || source.channel || 'stable';
+  return {
+    enabled: enabled && Boolean(owner && repo),
+    enforce,
+    channel,
+    owner,
+    repo,
+    assetName
+  };
+};
+
+const APP_VERSION = app.getVersion();
+const updateConfig = normalizeUpdateConfig(config.APP_UPDATES || {});
+const UPDATE_CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedUpdateInfo = null;
+let updateCheckPromise = null;
+let updateDownloadTask = null;
+
+const sendUpdateEvent = (payload) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('app:update:event', payload);
+  } catch (err) {
+    console.warn('[updates] Failed to send update event:', err);
+  }
+};
+
+const broadcastUpdateState = (state) => {
+  sendUpdateEvent({ type: 'state', state });
+};
+
+const extractVersionFromString = (value) => {
+  if (!value) return null;
+  const match = String(value).match(/(\d+(?:\.\d+)+)/);
+  return match ? match[1] : null;
+};
+
+const compareVersionStrings = (a, b) => {
+  if (a === b) return 0;
+  if (!a && !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  const aParts = String(a)
+    .split(/[^0-9A-Za-z]+/)
+    .filter(Boolean);
+  const bParts = String(b)
+    .split(/[^0-9A-Za-z]+/)
+    .filter(Boolean);
+  const length = Math.max(aParts.length, bParts.length);
+  for (let i = 0; i < length; i += 1) {
+    const left = aParts[i] || '0';
+    const right = bParts[i] || '0';
+    const leftNum = Number(left);
+    const rightNum = Number(right);
+    if (!Number.isNaN(leftNum) && !Number.isNaN(rightNum)) {
+      if (leftNum > rightNum) return 1;
+      if (leftNum < rightNum) return -1;
+    } else {
+      const cmp = left.localeCompare(right);
+      if (cmp > 0) return 1;
+      if (cmp < 0) return -1;
+    }
+  }
+  return 0;
+};
+
+const fetchLatestReleaseMetadata = async () => {
+  const url = `https://api.github.com/repos/${updateConfig.owner}/${updateConfig.repo}/releases/latest`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'compass-mc-launcher'
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    const error = new Error(`Update metadata request failed (${response.status})`);
+    error.status = response.status;
+    error.responseText = text;
+    throw error;
+  }
+  return response.json();
+};
+
+const buildUpdateInfoFromRelease = (release) => {
+  if (!release) {
+    throw new Error('Release payload is empty.');
+  }
+  const releaseVersion =
+    extractVersionFromString(release.tag_name) || extractVersionFromString(release.name);
+  if (!releaseVersion) {
+    throw new Error('Latest release does not contain a recognizable version tag.');
+  }
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  let asset = null;
+  if (updateConfig.assetName) {
+    asset = assets.find((entry) => entry && entry.name === updateConfig.assetName);
+  }
+  if (!asset) {
+    asset = assets.find((entry) => entry && /\.exe$/i.test(entry.name || ''));
+  }
+  if (!asset) {
+    throw new Error('Release is missing a portable executable asset.');
+  }
+  const comparison = compareVersionStrings(releaseVersion, APP_VERSION);
+  return {
+    enabled: true,
+    enforce: updateConfig.enforce,
+    status: 'ok',
+    currentVersion: APP_VERSION,
+    latestVersion: releaseVersion,
+    releaseTag: release.tag_name || null,
+    publishedAt: release.published_at || null,
+    releaseNotes: release.body || '',
+    downloadUrl: asset.browser_download_url,
+    assetName: asset.name,
+    assetSize: typeof asset.size === 'number' ? asset.size : null,
+    needsUpdate: comparison > 0,
+    mandatory: comparison > 0 && updateConfig.enforce,
+    fetchedAt: Date.now()
+  };
+};
+
+const getLatestUpdateInfo = async (force = false) => {
+  if (!updateConfig.enabled) {
+    const info = {
+      enabled: false,
+      enforce: updateConfig.enforce,
+      status: 'disabled',
+      currentVersion: APP_VERSION,
+      latestVersion: null,
+      releaseTag: null,
+      publishedAt: null,
+      releaseNotes: null,
+      downloadUrl: null,
+      assetName: null,
+      assetSize: null,
+      needsUpdate: false,
+      mandatory: false,
+      fetchedAt: Date.now()
+    };
+    cachedUpdateInfo = info;
+    broadcastUpdateState(info);
+    return info;
+  }
+
+  if (!force && cachedUpdateInfo && Date.now() - cachedUpdateInfo.fetchedAt < UPDATE_CACHE_TTL_MS) {
+    broadcastUpdateState(cachedUpdateInfo);
+    return cachedUpdateInfo;
+  }
+
+  if (force) {
+    cachedUpdateInfo = null;
+  }
+
+  if (updateCheckPromise) {
+    return updateCheckPromise;
+  }
+
+  updateCheckPromise = (async () => {
+    try {
+      const release = await fetchLatestReleaseMetadata();
+      const info = buildUpdateInfoFromRelease(release);
+      cachedUpdateInfo = info;
+      broadcastUpdateState(info);
+      return info;
+    } catch (err) {
+      console.warn('[updates] Failed to retrieve update info:', err);
+      const failure = {
+        enabled: true,
+        enforce: updateConfig.enforce,
+        status: 'error',
+        currentVersion: APP_VERSION,
+        latestVersion: null,
+        releaseTag: null,
+        publishedAt: null,
+        releaseNotes: null,
+        downloadUrl: null,
+        assetName: null,
+        assetSize: null,
+        needsUpdate: false,
+        mandatory: false,
+        fetchedAt: Date.now(),
+        error: err.message || String(err)
+      };
+      cachedUpdateInfo = failure;
+      broadcastUpdateState(failure);
+      return failure;
+    } finally {
+      updateCheckPromise = null;
+    }
+  })();
+
+  return updateCheckPromise;
+};
+
+const scheduleUpdateReplacement = async (downloadPath) => {
+  if (!downloadPath) {
+    throw new Error('Update payload path is missing.');
+  }
+
+  const scriptPath = path.join(
+    os.tmpdir(),
+    `mc-launcher-update-${Date.now()}-${Math.random().toString(16).slice(2)}.ps1`
+  );
+
+  const scriptContent = [
+    'param(',
+    '  [Parameter(Mandatory=$true)][string]$SourcePath,',
+    '  [Parameter(Mandatory=$true)][string]$TargetPath,',
+    '  [Parameter(Mandatory=$true)][int]$ProcessId',
+    ')',
+    '$attempts = 0',
+    'while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {',
+    '  Start-Sleep -Milliseconds 200',
+    '}',
+    'while ($attempts -lt 120) {',
+    '  try {',
+    '    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Force',
+    '    Remove-Item -LiteralPath $SourcePath -Force -ErrorAction SilentlyContinue',
+    '    Start-Process -FilePath $TargetPath',
+    '    break',
+    '  } catch {',
+    '    Start-Sleep -Milliseconds 500',
+    '    $attempts++',
+    '  }',
+    '}',
+    'Remove-Item -LiteralPath $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue'
+  ].join('\r\n');
+
+  await fs.promises.writeFile(scriptPath, scriptContent, 'utf8');
+
+  const args = [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-SourcePath',
+    downloadPath,
+    '-TargetPath',
+    process.execPath,
+    '-ProcessId',
+    String(process.pid)
+  ];
+
+  try {
+    const updater = spawn('powershell.exe', args, {
+      detached: true,
+      stdio: 'ignore'
+    });
+    updater.unref();
+  } catch (err) {
+    throw new Error(`Failed to launch updater script: ${err.message || err}`);
+  }
+
+  setTimeout(() => {
+    app.quit();
+    setTimeout(() => {
+      app.exit(0);
+    }, 1000);
+  }, 200);
+};
+
+const downloadAndApplyUpdate = async (info) => {
+  if (!info || !info.downloadUrl) {
+    throw new Error('Update download link is unavailable.');
+  }
+  if (updateDownloadTask) {
+    throw new Error('An update is already being downloaded.');
+  }
+
+  const controller = new AbortController();
+  const tempPath = path.join(
+    os.tmpdir(),
+    `mc-launcher-update-${Date.now()}-${Math.random().toString(16).slice(2)}.exe`
+  );
+
+  updateDownloadTask = { controller, tempPath };
+  sendUpdateEvent({ type: 'status', status: 'downloading' });
+
+  let downloadedBytes = 0;
+  let totalBytes = null;
+  let scheduled = false;
+
+  try {
+    const response = await fetch(info.downloadUrl, {
+      headers: {
+        'User-Agent': 'compass-mc-launcher'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `Download failed (${response.status}): ${text ? text.slice(0, 120) : 'no response body'}`
+      );
+    }
+
+    if (!response.body) {
+      throw new Error('Update download stream is missing.');
+    }
+
+    totalBytes = Number(response.headers.get('content-length')) || null;
+
+    response.body.on('data', (chunk) => {
+      downloadedBytes += chunk.length;
+      const percent = totalBytes
+        ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+        : null;
+      sendUpdateEvent({
+        type: 'progress',
+        downloadedBytes,
+        totalBytes,
+        percent
+      });
+    });
+
+    const outStream = fs.createWriteStream(tempPath);
+    await pipeline(response.body, outStream);
+
+    sendUpdateEvent({
+      type: 'status',
+      status: 'downloaded',
+      downloadedBytes,
+      totalBytes
+    });
+
+    await scheduleUpdateReplacement(tempPath);
+    scheduled = true;
+    sendUpdateEvent({ type: 'status', status: 'restarting' });
+  } catch (err) {
+    sendUpdateEvent({
+      type: 'status',
+      status: 'error',
+      error: err.message || String(err)
+    });
+
+    try {
+      if (!scheduled && (await fs.pathExists(tempPath))) {
+        await fs.remove(tempPath);
+      }
+    } catch (cleanupErr) {
+      console.warn('[updates] Failed to cleanup temporary update file:', cleanupErr);
+    }
+
+    throw err;
+  } finally {
+    updateDownloadTask = null;
+  }
+};
 
 const cloneJson = (value) => {
   if (!value || typeof value !== 'object') return null;
@@ -1822,18 +2244,47 @@ const registerDraslAccount = async ({ username, password, playerName, inviteCode
   return authenticateWithPassword(sanitizedUsername, password);
 };
 
-ipcMain.handle('app:bootstrap', async () => ({
-  settings: serializeSettings(),
-  auth: serializeAuthState(),
-  modpacks: serializeModpacks(),
-  servers: serializeServers(),
-  activeModpackId,
-  paths: activePaths,
-  defaults: {
-    ramMb: DEFAULT_RAM,
-    minRamMb: DEFAULT_MIN_RAM
+ipcMain.handle('app:bootstrap', async () => {
+  const update = await getLatestUpdateInfo(true);
+  return {
+    settings: serializeSettings(),
+    auth: serializeAuthState(),
+    modpacks: serializeModpacks(),
+    servers: serializeServers(),
+    activeModpackId,
+    paths: activePaths,
+    defaults: {
+      ramMb: DEFAULT_RAM,
+      minRamMb: DEFAULT_MIN_RAM
+    },
+    update
+  };
+});
+
+ipcMain.handle('app:update:refresh', async () => getLatestUpdateInfo(true));
+
+ipcMain.handle('app:update:start', async () => {
+  try {
+    const info = await getLatestUpdateInfo(true);
+    if (!info.enabled) {
+      return { ok: false, error: 'Автообновления отключены.' };
+    }
+    if (!info.downloadUrl) {
+      return {
+        ok: false,
+        error: info.error || 'Не удалось получить ссылку на обновление.'
+      };
+    }
+    if (!info.needsUpdate) {
+      return { ok: false, error: 'Текущая версия уже актуальна.' };
+    }
+    await downloadAndApplyUpdate(info);
+    return { ok: true };
+  } catch (err) {
+    console.warn('[updates] Failed to start update:', err);
+    return { ok: false, error: err.message || String(err) };
   }
-}));
+});
 
 ipcMain.handle('auth:status', async () => ({
   ok: true,
