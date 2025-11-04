@@ -225,8 +225,113 @@ const normalizeUpdateConfig = (raw = {}) => {
   };
 };
 
+const normalizeThemeConfig = (raw = {}) => {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const source = raw || {};
+  const coalesce = (value) => {
+    if (value === undefined || value === null) return undefined;
+    return value;
+  };
+  const pickString = (...keys) => {
+    for (const key of keys) {
+      const candidate = coalesce(source[key]);
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+    return undefined;
+  };
+
+  const theme = {};
+
+  const backgroundImage = pickString(
+    'backgroundImage',
+    'background_image',
+    'background',
+    'image',
+    'BACKGROUND_IMAGE'
+  );
+  if (backgroundImage) {
+    theme.backgroundImage = backgroundImage;
+  }
+
+  const glassTint = pickString('glassTint', 'glass_tint', 'tint', 'GLASS_TINT');
+  if (glassTint) {
+    theme.glassTint = glassTint;
+  }
+
+  const glassOpacityRaw =
+    coalesce(source.glassOpacity) ??
+    coalesce(source.glass_opacity) ??
+    coalesce(source.opacity) ??
+    coalesce(source.GLASS_OPACITY);
+  if (glassOpacityRaw !== undefined) {
+    const numeric = Number(glassOpacityRaw);
+    if (!Number.isNaN(numeric)) {
+      theme.glassOpacity = Math.min(1, Math.max(0, numeric));
+    }
+  }
+
+  const blurRaw =
+    coalesce(source.blurRadius) ??
+    coalesce(source.blur_radius) ??
+    coalesce(source.blur) ??
+    coalesce(source.BLUR_RADIUS);
+  if (blurRaw !== undefined) {
+    const numeric = Number(blurRaw);
+    if (!Number.isNaN(numeric) && numeric >= 0) {
+      theme.blurRadius = numeric;
+    }
+  }
+
+  const fireflySource =
+    coalesce(source.firefly) ??
+    coalesce(source.Firefly) ??
+    coalesce(source.FIREFLY);
+  if (fireflySource && typeof fireflySource === 'object') {
+    const firefly = {};
+    const color =
+      typeof fireflySource.color === 'string'
+        ? fireflySource.color.trim()
+        : typeof fireflySource.COLOR === 'string'
+        ? fireflySource.COLOR.trim()
+        : undefined;
+    if (color) {
+      firefly.color = color;
+    }
+    const sizeRaw = fireflySource.size ?? fireflySource.SIZE;
+    if (sizeRaw !== undefined) {
+      const numeric = Number(sizeRaw);
+      if (!Number.isNaN(numeric) && numeric > 0) {
+        firefly.size = numeric;
+      }
+    }
+    const speedRaw = fireflySource.speed ?? fireflySource.SPEED;
+    if (speedRaw !== undefined) {
+      const numeric = Number(speedRaw);
+      if (!Number.isNaN(numeric) && numeric > 0) {
+        firefly.speed = numeric;
+      }
+    }
+    if (Object.keys(firefly).length > 0) {
+      theme.firefly = firefly;
+    }
+  }
+
+  return theme;
+};
+
 const APP_VERSION = app.getVersion();
 const updateConfig = normalizeUpdateConfig(config.APP_UPDATES || {});
+const uiThemeConfig = Object.freeze(
+  normalizeThemeConfig(
+    config.UI_THEME ||
+      (config.UI && (config.UI.THEME || config.UI.theme)) ||
+      {}
+  )
+);
 const UPDATE_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedUpdateInfo = null;
 let updateCheckPromise = null;
@@ -2381,6 +2486,7 @@ ipcMain.handle('app:bootstrap', async () => {
       ramMb: DEFAULT_RAM,
       minRamMb: DEFAULT_MIN_RAM
     },
+    theme: uiThemeConfig,
     update
   };
 });

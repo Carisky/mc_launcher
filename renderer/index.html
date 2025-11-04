@@ -151,11 +151,169 @@
           cardBorder: "rgba(129, 140, 248, 0.45)",
           cardShadow: "0 16px 32px rgba(129, 140, 248, 0.25)",
           iconColor: "#c7d2fe",
-          icon: DayPhaseIcon.night,
-        },
+      icon: DayPhaseIcon.night,
+    },
+  };
+
+  const AmbientBackground = ({
+    imageSrc,
+    glassTint,
+    glassOpacity,
+    blurRadius,
+    fireflyConfig,
+  }) => {
+    const containerRef = useRef(null);
+    const fireflyRef = useRef(null);
+
+    useEffect(() => {
+      const container = containerRef.current;
+      const orb = fireflyRef.current;
+      if (!container || !orb) return undefined;
+
+      const padding = 56;
+      let rect = container.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) {
+        rect = {
+          width: container.offsetWidth || 1,
+          height: container.offsetHeight || 1,
+        };
+      }
+
+      const speedMultiplier = Math.max(
+        0.4,
+        Math.min(2.8, Number(fireflyConfig?.speed) || 1)
+      );
+      const stepBase = 0.013 * speedMultiplier;
+
+      let frameId = null;
+      let lastTimestamp = performance.now();
+      let position = {
+        x: rect.width * 0.55,
+        y: rect.height * 0.45,
+      };
+      let target = { ...position };
+
+      const pickTarget = () => {
+        rect = container.getBoundingClientRect();
+        const width = Math.max(0, rect.width - padding * 2);
+        const height = Math.max(0, rect.height - padding * 2);
+        target = {
+          x: padding + Math.random() * (width || 0),
+          y: padding + Math.random() * (height || 0),
+        };
       };
 
-      function App() {
+      const animate = (timestamp) => {
+        frameId = requestAnimationFrame(animate);
+        const dt = Math.max(16, Math.min(120, timestamp - lastTimestamp));
+        lastTimestamp = timestamp;
+
+        const dx = target.x - position.x;
+        const dy = target.y - position.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const lerpFactor = Math.min(0.25, stepBase * (dt / 16.6667));
+
+        position = {
+          x: position.x + dx * lerpFactor,
+          y: position.y + dy * lerpFactor,
+        };
+
+        orb.style.transform = `translate3d(${position.x}px, ${position.y}px, 0) translate(-50%, -50%)`;
+
+        if (!distance || distance < 24) {
+          pickTarget();
+        }
+      };
+
+      pickTarget();
+      frameId = requestAnimationFrame(animate);
+
+      const handleResize = () => {
+        rect = container.getBoundingClientRect();
+        position.x = clamp(
+          position.x,
+          padding,
+          Math.max(padding, rect.width - padding)
+        );
+        position.y = clamp(
+          position.y,
+          padding,
+          Math.max(padding, rect.height - padding)
+        );
+        pickTarget();
+      };
+
+      window.addEventListener("resize", handleResize);
+      return () => {
+        if (frameId) {
+          cancelAnimationFrame(frameId);
+        }
+        window.removeEventListener("resize", handleResize);
+      };
+    }, [fireflyConfig?.speed, imageSrc]);
+
+    const hasImage = Boolean(imageSrc);
+    const overlayColor =
+      typeof glassTint === "string" && glassTint.trim()
+        ? glassTint.trim()
+        : "rgba(92, 47, 200, 0.62)";
+    const overlayOpacity =
+      typeof glassOpacity === "number" && !Number.isNaN(glassOpacity)
+        ? Math.min(1, Math.max(0, glassOpacity))
+        : 0.65;
+    const blurValue =
+      typeof blurRadius === "number" && !Number.isNaN(blurRadius)
+        ? Math.max(0, blurRadius)
+        : 26;
+    const fireflyColor =
+      fireflyConfig?.color && typeof fireflyConfig.color === "string"
+        ? fireflyConfig.color.trim()
+        : "rgba(255, 244, 214, 0.85)";
+    const fireflySize = clamp(
+      fireflyConfig?.size ? Number(fireflyConfig.size) : 320,
+      140,
+      520
+    );
+
+    let resolvedImage = imageSrc;
+    if (hasImage) {
+      try {
+        resolvedImage = new URL(imageSrc, window.location.href).toString();
+      } catch {
+        resolvedImage = imageSrc;
+      }
+    }
+
+    return (
+      <div
+        className="main-area-background"
+        data-has-image={hasImage}
+        ref={containerRef}
+        style={{
+          "--glass-tint": overlayColor,
+          "--glass-opacity": overlayOpacity,
+          "--glass-blur": `${blurValue}px`,
+          "--firefly-color": fireflyColor,
+          "--firefly-size": `${fireflySize}px`,
+        }}
+      >
+        <div
+          className="main-area-background-image"
+          style={
+            hasImage
+              ? { backgroundImage: `url("${resolvedImage}")` }
+              : undefined
+          }
+        />
+        <div className="main-area-background-gradient" />
+        <div className="main-area-background-glass" />
+        <div className="main-area-background-noise" />
+        <div className="main-area-firefly" ref={fireflyRef} />
+      </div>
+    );
+  };
+
+  function App() {
         const [bootstrapped, setBootstrapped] = useState(false);
         const [modpacks, setModpacks] = useState([]);
         const [activeModpackId, setActiveModpackId] = useState(null);
@@ -174,6 +332,7 @@
         const [syncing, setSyncing] = useState(false);
         const [downloadingShaders, setDownloadingShaders] = useState(false);
         const [downloadingResources, setDownloadingResources] = useState(false);
+        const [theme, setTheme] = useState({});
         const [launching, setLaunching] = useState(false);
         const [updateState, setUpdateState] = useState({
           enabled: false,
@@ -227,6 +386,76 @@
           [currentTime]
         );
         const MomentIcon = phaseVisual.icon;
+        const normalizedTheme = useMemo(() => {
+          if (!theme || typeof theme !== "object") {
+            return {};
+          }
+          const next = {};
+          const backgroundImage =
+            typeof theme.backgroundImage === "string"
+              ? theme.backgroundImage.trim()
+              : "";
+          if (backgroundImage) {
+            if (typeof window !== "undefined" && window?.location) {
+              try {
+                next.backgroundImage = new URL(
+                  backgroundImage,
+                  window.location.href
+                ).toString();
+              } catch {
+                next.backgroundImage = backgroundImage;
+              }
+            } else {
+              next.backgroundImage = backgroundImage;
+            }
+          }
+          if (
+            typeof theme.glassTint === "string" &&
+            theme.glassTint.trim()
+          ) {
+            next.glassTint = theme.glassTint.trim();
+          }
+          if (
+            typeof theme.glassOpacity === "number" &&
+            !Number.isNaN(theme.glassOpacity)
+          ) {
+            next.glassOpacity = Math.min(
+              1,
+              Math.max(0, theme.glassOpacity)
+            );
+          }
+          if (
+            typeof theme.blurRadius === "number" &&
+            !Number.isNaN(theme.blurRadius)
+          ) {
+            next.blurRadius = Math.max(0, theme.blurRadius);
+          }
+          if (theme.firefly && typeof theme.firefly === "object") {
+            const firefly = {};
+            if (
+              typeof theme.firefly.color === "string" &&
+              theme.firefly.color.trim()
+            ) {
+              firefly.color = theme.firefly.color.trim();
+            }
+            if (theme.firefly.size !== undefined) {
+              const value = Number(theme.firefly.size);
+              if (!Number.isNaN(value) && value > 0) {
+                firefly.size = value;
+              }
+            }
+            if (theme.firefly.speed !== undefined) {
+              const value = Number(theme.firefly.speed);
+              if (!Number.isNaN(value) && value > 0) {
+                firefly.speed = value;
+              }
+            }
+            if (Object.keys(firefly).length > 0) {
+              next.firefly = firefly;
+            }
+          }
+          return next;
+        }, [theme]);
         const logsRef = useRef(null);
         const readyRef = useRef(false);
         const skipSettingsSync = useRef(false);
@@ -779,6 +1008,7 @@
               setDefaults(
                 bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 }
               );
+              setTheme(bootstrap.theme || {});
               applySettings(settings);
               applyAuthState(bootstrap.auth || settings.auth || null);
               if (bootstrap.update) {
@@ -1435,7 +1665,15 @@
             </aside>
 
             <main className="main-area">
-              <section
+              <AmbientBackground
+                imageSrc={normalizedTheme.backgroundImage}
+                glassTint={normalizedTheme.glassTint}
+                glassOpacity={normalizedTheme.glassOpacity}
+                blurRadius={normalizedTheme.blurRadius}
+                fireflyConfig={normalizedTheme.firefly}
+              />
+              <div className="main-area-content">
+                <section
                 className="user-banner"
                 style={{ "--banner-glow": phaseVisual.glow }}
               >
@@ -1694,6 +1932,7 @@
 
 
 
+              </div>
             </main>
             {settingsOpen && (
               <div

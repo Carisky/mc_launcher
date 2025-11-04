@@ -28,6 +28,17 @@
       "ASSET_NAME": "Compass MC Launcher Portable.exe"
     }
   },
+  "UI_THEME": {
+    "backgroundImage": "",
+    "glassTint": "rgba(92, 47, 200, 0.62)",
+    "glassOpacity": 0.68,
+    "blurRadius": 28,
+    "firefly": {
+      "color": "rgba(255, 244, 214, 0.85)",
+      "size": 320,
+      "speed": 1
+    }
+  },
   "MODPACKS": [
     {
       "id": "dtm",
