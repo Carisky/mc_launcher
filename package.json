@@ -1,6 +1,6 @@
 {
   "name": "mc-launcher",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "main": "main.js",
   "description": "Yolka launcher for minecraft",
   "author": "Custom Launcher Team",

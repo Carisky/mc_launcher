@@ -113,10 +113,15 @@ const removeIfExists = async (target) => {
   await appendLog('Update applied, relaunching');
 
   try {
+    const childEnv = { ...process.env };
+    delete childEnv.ELECTRON_RUN_AS_NODE;
+    delete childEnv.ELECTRON_NO_ATTACH_CONSOLE;
+
     const child = spawn(targetPath, [], {
       detached: true,
       stdio: 'ignore',
-      cwd: path.dirname(targetPath)
+      cwd: path.dirname(targetPath),
+      env: childEnv
     });
     child.unref();
   } catch (err) {

@@ -34,7 +34,7 @@
     "glassOpacity": 0.68,
     "blurRadius": 28,
     "firefly": {
-      "color": "rgba(255, 244, 214, 0.85)",
+      "color": "rgba(255, 243, 214, 0.85)",
       "size": 120,
       "speed": 1
     }

@@ -264,6 +264,22 @@ const probes = async (ctx, token) => {
   }
 };
 
+// ===== Cleanup helpers
+const removeDirRecursive = async (dirPath) => {
+  if (!fs.existsSync(dirPath)) return;
+  try {
+    if (fs.promises.rm) {
+      await fs.promises.rm(dirPath, { recursive: true, force: true });
+    } else {
+      // Fallback для старых Node
+      await fs.promises.rmdir(dirPath, { recursive: true });
+    }
+    console.log(`[cleanup] Removed ${dirPath}`);
+  } catch (e) {
+    console.warn(`[cleanup] Failed to remove ${dirPath}:`, e.message);
+  }
+};
+
 // ===== Main
 const main = async () => {
   const pkg = readJson(path.join(ROOT, "package.json"));
@@ -320,6 +336,9 @@ const main = async () => {
   console.log(`[buildPortableRemotePush] Uploading asset ${desiredAssetName} (${ctx.version})`);
   await uploadAsset(release, assetPath, desiredAssetName, ctx, token);
   console.log("[buildPortableRemotePush] Upload complete.");
+
+  // NEW: cleanup dist after successful push
+  await removeDirRecursive(DIST_DIR);
 };
 
 main().catch((err) => {
