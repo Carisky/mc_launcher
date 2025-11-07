@@ -635,6 +635,14 @@ const toUpperKeys = (github = {}) => ({
 const shaderpacksRepoConfig = toUpperKeys(config.SHADERPACKS_GITHUB || {});
 const resourcepacksRepoConfig = toUpperKeys(config.RESOURCEPACKS_GITHUB || {});
 
+const MIN_FPS_LIMIT = 10;
+const MAX_FPS_LIMIT = 260;
+const GAME_OPTIONS_DEFAULTS = Object.freeze({
+  fpsLimit: MAX_FPS_LIMIT,
+  vsync: true,
+  language: 'ru_ru'
+});
+
 const slugify = (value, fallback) => {
   const base = String(value || fallback || 'modpack')
     .toLowerCase()
@@ -1285,6 +1293,259 @@ const updateUserSettings = async (patch = {}) => {
   }
   await persistUserSettings();
   return userSettings;
+};
+
+const clampFpsLimit = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  const rounded = Math.round(numeric);
+  return Math.max(MIN_FPS_LIMIT, Math.min(MAX_FPS_LIMIT, rounded));
+};
+
+const sanitizeLanguageCode = (value) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/-/g, '_')
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_');
+  return normalized || null;
+};
+
+const parseBooleanFlag = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
+  }
+  return null;
+};
+
+const readKeyValueFile = async (filePath) => {
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    const newline = content.includes('\r\n') ? '\r\n' : '\n';
+    const lines = content.split(/\r?\n/);
+    const entries = {};
+    for (const line of lines) {
+      if (!line) continue;
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx);
+      const value = line.slice(idx + 1);
+      entries[key] = value;
+    }
+    return { entries, newline, lines, exists: true };
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return { entries: {}, newline: '\n', lines: [], exists: false };
+    }
+    throw err;
+  }
+};
+
+const updateKeyValueFile = async (filePath, updates = {}) => {
+  const pairs = Object.entries(updates).filter(([, value]) => value !== undefined && value !== null);
+  if (!pairs.length) {
+    return null;
+  }
+
+  let newline = '\n';
+  let lines = [];
+  try {
+    const content = await fs.readFile(filePath, 'utf8');
+    newline = content.includes('\r\n') ? '\r\n' : '\n';
+    lines = content.split(/\r?\n/);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      throw err;
+    }
+    lines = [];
+  }
+
+  const replaced = new Set();
+  const serializedUpdates = pairs.reduce((acc, [key, value]) => {
+    acc[key] = String(value);
+    return acc;
+  }, {});
+
+  const nextLines = lines.map((line) => {
+    const idx = line.indexOf(':');
+    if (idx <= 0) return line;
+    const key = line.slice(0, idx);
+    if (Object.prototype.hasOwnProperty.call(serializedUpdates, key)) {
+      replaced.add(key);
+      return `${key}:${serializedUpdates[key]}`;
+    }
+    return line;
+  });
+
+  while (nextLines.length && !nextLines[nextLines.length - 1]) {
+    nextLines.pop();
+  }
+
+  for (const [key, value] of Object.entries(serializedUpdates)) {
+    if (!replaced.has(key)) {
+      nextLines.push(`${key}:${value}`);
+    }
+  }
+
+  const finalContent = nextLines.length ? `${nextLines.join(newline)}${newline}` : '';
+  await fs.ensureDir(path.dirname(filePath));
+  await fs.writeFile(filePath, finalContent, 'utf8');
+  return filePath;
+};
+
+const getActiveOptionsFiles = () => {
+  if (!activePaths || !activePaths.gameRoot) {
+    throw new Error('Active modpack paths are not resolved.');
+  }
+  return {
+    optionsTxt: path.join(activePaths.gameRoot, 'options.txt'),
+    optionsOfTxt: path.join(activePaths.gameRoot, 'optionsof.txt')
+  };
+};
+
+const normalizeGameOptionsPatch = (raw = {}) => {
+  const patch = {};
+  if (raw.fpsLimit !== undefined) {
+    const clamped = clampFpsLimit(raw.fpsLimit);
+    if (clamped !== null) {
+      patch.fpsLimit = clamped;
+    }
+  }
+  if (raw.unlimited !== undefined) {
+    patch.unlimited = Boolean(raw.unlimited);
+  }
+  if (raw.vsync !== undefined) {
+    patch.vsync = Boolean(raw.vsync);
+  }
+  if (raw.language !== undefined) {
+    const lang = sanitizeLanguageCode(raw.language);
+    if (lang) {
+      patch.language = lang;
+    }
+  }
+  return patch;
+};
+
+const readGameOptionsSnapshot = async () => {
+  const fallback = {
+    ...GAME_OPTIONS_DEFAULTS,
+    sources: {
+      optionsTxt: { path: null, exists: false },
+      optionsOfTxt: { path: null, exists: false }
+    },
+    updatedAt: Date.now()
+  };
+
+  if (!activePaths || !activePaths.gameRoot) {
+    return fallback;
+  }
+
+  const files = getActiveOptionsFiles();
+  fallback.sources.optionsTxt.path = files.optionsTxt;
+  fallback.sources.optionsOfTxt.path = files.optionsOfTxt;
+
+  try {
+    await fs.ensureDir(activePaths.gameRoot);
+    const [optionsData, optionsOfData] = await Promise.all([
+      readKeyValueFile(files.optionsTxt),
+      readKeyValueFile(files.optionsOfTxt)
+    ]);
+
+    fallback.sources.optionsTxt.exists = optionsData.exists;
+    fallback.sources.optionsOfTxt.exists = optionsOfData.exists;
+
+    const fpsCandidates = [
+      optionsData.entries.maxFramerate,
+      optionsData.entries.maxFps,
+      optionsData.entries.maxFPS
+    ].map(clampFpsLimit).filter((value) => value !== null);
+
+    const vsyncCandidates = [
+      optionsData.entries.enableVsync,
+      optionsData.entries.enableVSync,
+      optionsData.entries.vsync
+    ].map(parseBooleanFlag).filter((value) => value !== null);
+
+    const languageCandidates = [
+      sanitizeLanguageCode(optionsData.entries.lang),
+      sanitizeLanguageCode(optionsOfData.entries.ofLang),
+      sanitizeLanguageCode(optionsOfData.entries.lang)
+    ].filter(Boolean);
+
+    return {
+      fpsLimit: fpsCandidates[0] ?? GAME_OPTIONS_DEFAULTS.fpsLimit,
+      vsync: vsyncCandidates[0] ?? GAME_OPTIONS_DEFAULTS.vsync,
+      language: languageCandidates[0] ?? GAME_OPTIONS_DEFAULTS.language,
+      sources: fallback.sources,
+      updatedAt: Date.now()
+    };
+  } catch (err) {
+    console.warn('[options] Failed to read game options:', err);
+    return fallback;
+  }
+};
+
+const persistGameOptions = async (rawPatch = {}) => {
+  if (!activePaths || !activePaths.gameRoot) {
+    throw new Error('Active modpack paths are not available.');
+  }
+
+  const patch = normalizeGameOptionsPatch(rawPatch);
+  if (!Object.keys(patch).length) {
+    return readGameOptionsSnapshot();
+  }
+
+  const { optionsTxt, optionsOfTxt } = getActiveOptionsFiles();
+  await fs.ensureDir(activePaths.gameRoot);
+
+  const mainUpdates = {};
+  const optifineUpdates = {};
+
+  if (patch.vsync !== undefined) {
+    const flag = patch.vsync ? 'true' : 'false';
+    mainUpdates.enableVsync = flag;
+    mainUpdates.enableVSync = flag;
+    mainUpdates.vsync = flag;
+    optifineUpdates.ofVsync = flag;
+  }
+
+  if (patch.language) {
+    mainUpdates.lang = patch.language;
+    optifineUpdates.ofLang = patch.language;
+    optifineUpdates.lang = patch.language;
+  }
+
+  if (patch.unlimited || patch.fpsLimit !== undefined) {
+    const fpsValue = patch.unlimited
+      ? MAX_FPS_LIMIT
+      : (patch.fpsLimit !== undefined ? clampFpsLimit(patch.fpsLimit) : null);
+    if (fpsValue !== null) {
+      const fpsString = String(fpsValue);
+      mainUpdates.maxFramerate = fpsString;
+      mainUpdates.maxFps = fpsString;
+      optifineUpdates.ofLimitFPS = fpsString;
+    }
+  }
+
+  const tasks = [];
+  if (Object.keys(mainUpdates).length) {
+    tasks.push(updateKeyValueFile(optionsTxt, mainUpdates));
+  }
+  if (Object.keys(optifineUpdates).length) {
+    tasks.push(updateKeyValueFile(optionsOfTxt, optifineUpdates));
+  }
+  await Promise.all(tasks);
+  return readGameOptionsSnapshot();
 };
 
 const serializeSettings = () => {
@@ -2001,7 +2262,10 @@ const registerDraslAccount = async ({ username, password, playerName, inviteCode
 };
 
 ipcMain.handle('app:bootstrap', async () => {
-  const update = await getLatestUpdateInfo(true);
+  const [update, gameOptions] = await Promise.all([
+    getLatestUpdateInfo(true),
+    readGameOptionsSnapshot()
+  ]);
   return {
     settings: serializeSettings(),
     auth: serializeAuthState(),
@@ -2014,6 +2278,7 @@ ipcMain.handle('app:bootstrap', async () => {
       minRamMb: DEFAULT_MIN_RAM
     },
     theme: uiThemeConfig,
+    gameOptions,
     update
   };
 });
@@ -2109,12 +2374,33 @@ ipcMain.handle('settings:update', async (_event, patch) => {
   return serializeSettings();
 });
 
+ipcMain.handle('game-options:read', async () => {
+  try {
+    const gameOptions = await readGameOptionsSnapshot();
+    return { ok: true, gameOptions };
+  } catch (err) {
+    console.warn('[options] Failed to read options snapshot:', err);
+    return { ok: false, error: err.message || 'Failed to read options.txt' };
+  }
+});
+
+ipcMain.handle('game-options:update', async (_event, payload = {}) => {
+  try {
+    const gameOptions = await persistGameOptions(payload);
+    return { ok: true, gameOptions };
+  } catch (err) {
+    console.warn('[options] Failed to persist game options:', err);
+    return { ok: false, error: err.message || 'Failed to update options.txt' };
+  }
+});
+
 ipcMain.handle('modpack:set', async (_event, modpackId) => {
   await updateActiveModpack(modpackId);
   return {
     activeModpackId,
     paths: activePaths,
-    settings: serializeSettings()
+    settings: serializeSettings(),
+    gameOptions: await readGameOptionsSnapshot()
   };
 });
 

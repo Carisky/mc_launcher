@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('launcher', {
   authLogout: () => invoke('auth:logout'),
   authRefresh: () => invoke('auth:refresh'),
   updateSettings: (payload) => invoke('settings:update', payload),
+  getGameOptions: () => invoke('game-options:read'),
+  updateGameOptions: (payload) => invoke('game-options:update', payload),
   selectModpack: (modpackId) => invoke('modpack:set', modpackId),
   openModsFolder: (modpackId) => invoke('fs:openModsDir', modpackId),
   syncMods: () => invoke('mods:sync'),

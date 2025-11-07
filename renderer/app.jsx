@@ -1,6 +1,62 @@
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const FPS_LIMIT_MIN = 10;
+const FPS_LIMIT_MAX = 260;
+const LANGUAGE_PRESETS = [
+  { code: "ru_ru", label: "Русский (Россия)" },
+  { code: "uk_ua", label: "Українська (Україна)" },
+  { code: "be_by", label: "Беларуская (Беларусь)" },
+  { code: "en_us", label: "English (US)" },
+  { code: "en_gb", label: "English (UK)" },
+  { code: "de_de", label: "Deutsch (Deutschland)" },
+  { code: "pl_pl", label: "Polski (Polska)" },
+  { code: "es_es", label: "Español (España)" },
+  { code: "pt_br", label: "Português (Brasil)" },
+  { code: "fr_fr", label: "Français (France)" },
+  { code: "kk_kz", label: "Қазақ тілі (Қазақстан)" },
+  { code: "tr_tr", label: "Türkçe (Türkiye)" },
+  { code: "zh_cn", label: "简体中文 (中国)" },
+  { code: "ja_jp", label: "日本語 (日本)" }
+];
+
+const DEFAULT_GAME_OPTIONS_STATE = {
+  fpsLimit: FPS_LIMIT_MAX,
+  vsync: true,
+  language: "ru_ru",
+  updatedAt: null,
+  sources: null
+};
+
+const normalizeGameOptionsState = (raw) => {
+  const normalized = { ...DEFAULT_GAME_OPTIONS_STATE };
+  if (!raw || typeof raw !== "object") {
+    return normalized;
+  }
+  const fpsValue = Number(raw.fpsLimit);
+  if (Number.isFinite(fpsValue)) {
+    normalized.fpsLimit = clamp(Math.round(fpsValue), FPS_LIMIT_MIN, FPS_LIMIT_MAX);
+  }
+  if (raw.vsync !== undefined) {
+    normalized.vsync = Boolean(raw.vsync);
+  }
+  if (typeof raw.language === "string" && raw.language.trim()) {
+    normalized.language = raw.language.trim().toLowerCase();
+  }
+  normalized.updatedAt = raw.updatedAt || Date.now();
+  normalized.sources = raw.sources || null;
+  return normalized;
+};
+
+const sanitizeLanguageInput = (value) =>
+  typeof value === "string"
+    ? value
+        .trim()
+        .toLowerCase()
+        .replace(/-/g, "_")
+        .replace(/[^a-z0-9_]/g, "_")
+        .replace(/_+/g, "_")
+    : "";
 
 const MIN_SERVER_REFRESH_MS = 10000;
 const PROFILE_GRADIENTS = [
@@ -315,6 +371,17 @@ try {
   const [downloadingShaders, setDownloadingShaders] = useState(false);
   const [downloadingResources, setDownloadingResources] = useState(false);
   const [theme, setTheme] = useState({});
+  const [gameOptions, setGameOptions] = useState(() =>
+    normalizeGameOptionsState()
+  );
+  const [gameOptionsSaving, setGameOptionsSaving] = useState(false);
+  const [gameOptionsError, setGameOptionsError] = useState("");
+  const [fpsInput, setFpsInput] = useState(
+    String(DEFAULT_GAME_OPTIONS_STATE.fpsLimit)
+  );
+  const [languageInput, setLanguageInput] = useState(
+    DEFAULT_GAME_OPTIONS_STATE.language
+  );
   const [launching, setLaunching] = useState(false);
   const [updateState, setUpdateState] = useState({
     enabled: false,
@@ -368,6 +435,36 @@ try {
     [currentTime]
   );
   const MomentIcon = phaseVisual.icon;
+  const fpsMode = useMemo(() => {
+    if (gameOptions.vsync) return "vsync";
+    if (gameOptions.fpsLimit >= FPS_LIMIT_MAX) return "unlimited";
+    return "limit";
+  }, [gameOptions]);
+
+  const fpsSummary = useMemo(() => {
+    if (gameOptions.vsync) return "V-Sync (монитор)";
+    if (gameOptions.fpsLimit >= FPS_LIMIT_MAX) return "Без лимита";
+    return `${gameOptions.fpsLimit} FPS`;
+  }, [gameOptions]);
+
+  const languageSummary = useMemo(
+    () => (gameOptions.language || "ru_ru").toLowerCase(),
+    [gameOptions.language]
+  );
+
+  const gameOptionsStatusText = useMemo(() => {
+    if (gameOptionsSaving) {
+      return "Сохраняем настройки...";
+    }
+    const updatedTime = gameOptions.updatedAt
+      ? new Date(gameOptions.updatedAt).toLocaleTimeString("ru-RU", {
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : "";
+    const timeSuffix = updatedTime ? ` · обновлено ${updatedTime}` : "";
+    return `Применено: ${fpsSummary} · язык ${languageSummary}${timeSuffix}`;
+  }, [fpsSummary, languageSummary, gameOptions.updatedAt, gameOptionsSaving]);
   const normalizedTheme = useMemo(() => {
     if (!theme || typeof theme !== "object") {
       return {};
@@ -532,6 +629,110 @@ try {
     setRam(nextSettings.ramMb ?? defaults.ramMb);
     applyAuthState(nextSettings.auth || null);
   };
+
+  const syncGameOptionsState = useCallback((nextOptions) => {
+    const normalized = normalizeGameOptionsState(nextOptions);
+    setGameOptions(normalized);
+    setFpsInput(String(normalized.fpsLimit));
+    setLanguageInput(normalized.language);
+  }, []);
+
+  const clampFpsInputValue = useCallback((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return FPS_LIMIT_MIN;
+    }
+    return clamp(Math.round(numeric), FPS_LIMIT_MIN, FPS_LIMIT_MAX);
+  }, []);
+
+  const persistGameOptions = useCallback(
+    async (patch) => {
+      if (typeof window.launcher?.updateGameOptions !== "function") {
+        return;
+      }
+      setGameOptionsSaving(true);
+      try {
+        const response = await window.launcher.updateGameOptions(patch);
+        if (response?.ok === false) {
+          throw new Error(response.error || "�?�� �?�?���>�?�?�? ����'��?��?�?�?���'�? �?���?�'�?�?�����.");
+        }
+        syncGameOptionsState(response?.gameOptions || patch);
+        setGameOptionsError("");
+      } catch (error) {
+        setGameOptionsError(
+          error?.message ||
+            "�?�� �?�?���>�?�?�? ����'��?��?�?�?���'�? �?�?�?�?�?�?�? �?�? options.txt."
+        );
+      } finally {
+        setGameOptionsSaving(false);
+      }
+    },
+    [syncGameOptionsState]
+  );
+
+  const handleFpsModeChange = useCallback(
+    (mode) => {
+      if (mode === "vsync") {
+        if (!gameOptions.vsync) {
+          persistGameOptions({ vsync: true });
+        }
+        return;
+      }
+      if (mode === "unlimited") {
+        const needsUpdate =
+          gameOptions.vsync || gameOptions.fpsLimit < FPS_LIMIT_MAX;
+        if (needsUpdate) {
+          persistGameOptions({ vsync: false, unlimited: true });
+        }
+        return;
+      }
+      if (mode === "limit") {
+        const nextValue = clampFpsInputValue(fpsInput || gameOptions.fpsLimit);
+        setFpsInput(String(nextValue));
+        persistGameOptions({ vsync: false, fpsLimit: nextValue });
+      }
+    },
+    [gameOptions, fpsInput, clampFpsInputValue, persistGameOptions]
+  );
+
+  const commitFpsInput = useCallback(() => {
+    const normalized = clampFpsInputValue(fpsInput || gameOptions.fpsLimit);
+    setFpsInput(String(normalized));
+    if (!gameOptions.vsync && gameOptions.fpsLimit === normalized) {
+      return;
+    }
+    persistGameOptions({ vsync: false, fpsLimit: normalized });
+  }, [clampFpsInputValue, fpsInput, gameOptions, persistGameOptions]);
+
+  const handleFpsInputChange = useCallback((value) => {
+    setFpsInput(value);
+  }, []);
+
+  const handleFpsInputKeyDown = useCallback(
+    (event) => {
+      if (event.key === "Enter") {
+        commitFpsInput();
+      }
+    },
+    [commitFpsInput]
+  );
+
+  const handleLanguageBlur = useCallback(() => {
+    const normalized = sanitizeLanguageInput(languageInput);
+    if (!normalized) {
+      setLanguageInput(gameOptions.language);
+      return;
+    }
+    if (normalized === gameOptions.language) {
+      setLanguageInput(normalized);
+      return;
+    }
+    persistGameOptions({ language: normalized });
+  }, [gameOptions.language, languageInput, persistGameOptions]);
+
+  const handleLanguageInputChange = useCallback((value) => {
+    setLanguageInput(value.toLowerCase());
+  }, []);
 
   const applyUpdateSnapshot = useCallback((snapshot) => {
     if (!snapshot) return;
@@ -992,6 +1193,11 @@ try {
         );
         setTheme(bootstrap.theme || {});
         applySettings(settings);
+        if (bootstrap.gameOptions) {
+          syncGameOptionsState(bootstrap.gameOptions);
+        } else {
+          syncGameOptionsState(DEFAULT_GAME_OPTIONS_STATE);
+        }
         applyAuthState(bootstrap.auth || settings.auth || null);
         if (bootstrap.update) {
           applyUpdateSnapshot(bootstrap.update);
@@ -1301,6 +1507,11 @@ const activeModpack = useMemo(
       setPaths(result.paths || {});
       if (result.settings) {
         applySettings(result.settings);
+      }
+      if (result.gameOptions) {
+        syncGameOptionsState(result.gameOptions);
+      } else {
+        syncGameOptionsState(DEFAULT_GAME_OPTIONS_STATE);
       }
       setStatus(`Сборка "${modpack.name}" готова.`);
     } catch (err) {
@@ -1967,9 +2178,121 @@ const activeModpack = useMemo(
                   Минимум {defaults.minRamMb || 1024} МБ. Рекомендуемо от {Math.max(defaults.ramMb, defaults.minRamMb)} МБ.
                 </span>
               </label>
+
+
+              <div className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <span className="settings-card-title">FPS и плавность</span>
+                    <p className="settings-card-subtitle">
+                      Управляйте V-Sync и ограничением FPS прямо из лаунчера перед запуском.
+                    </p>
+                  </div>
+                </div>
+                <div
+                  className="fps-mode-toggle"
+                  role="group"
+                  aria-label="Режим частоты кадров"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "vsync"}
+                    className={fpsMode === "vsync" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("vsync")}
+                  >
+                    V-Sync
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "limit"}
+                    className={fpsMode === "limit" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("limit")}
+                  >
+                    Лимит FPS
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "unlimited"}
+                    className={fpsMode === "unlimited" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("unlimited")}
+                  >
+                    Без лимита
+                  </button>
+                </div>
+                <div className="fps-limit-input">
+                  <input
+                    id="fps-limit-input"
+                    type="number"
+                    min={FPS_LIMIT_MIN}
+                    max={FPS_LIMIT_MAX}
+                    step="5"
+                    value={fpsInput}
+                    onChange={(event) =>
+                      handleFpsInputChange(event.target.value)
+                    }
+                    onBlur={commitFpsInput}
+                    onKeyDown={handleFpsInputKeyDown}
+                  />
+                  <span className="hint">
+                    Введите любое значение от {FPS_LIMIT_MIN} до {FPS_LIMIT_MAX} FPS.
+                    При вводе режим «Лимит FPS» выбирается автоматически.
+                  </span>
+                </div>
+                <div className="settings-meta">
+                  <span className="settings-pill">Выбрано: {fpsSummary}</span>
+                  <span className="settings-pill">
+                    Текущее значение: {fpsInput || String(gameOptions.fpsLimit)} FPS
+                  </span>
+                </div>
+              </div>
+              <div className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <span className="settings-card-title">Язык клиента</span>
+                    <p className="settings-card-subtitle">
+                      Введите официальный код Mojang (ru_ru, en_us, uk_ua и т.д.).
+                    </p>
+                  </div>
+                </div>
+                <div className="language-input">
+                  <input
+                    type="text"
+                    value={languageInput}
+                    placeholder="ru_ru"
+                    list="game-language-options"
+                    onChange={(event) =>
+                      handleLanguageInputChange(event.target.value)
+                    }
+                    onBlur={handleLanguageBlur}
+                  />
+                  <span className="hint">
+                    Код автоматически синхронизируется с options.txt и optionsof.txt.
+                  </span>
+                  <datalist id="game-language-options">
+                    {LANGUAGE_PRESETS.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+                <div className="settings-meta">
+                  <span className="settings-pill">Текущий код: {languageSummary}</span>
+                </div>
+              </div>
+              <div
+                className={`game-options-status ${
+                  gameOptionsSaving ? "saving" : ""
+                }`}
+              >
+                <span>{gameOptionsStatusText}</span>
+              </div>
+              {gameOptionsError && (
+                <p className="settings-error">{gameOptionsError}</p>
+              )}
             </div>
             <p className="settings-hint">
-              Совет: настройки сохраняются автоматически после синхронизации сборки.
+              Совет: параметры профиля и игры сохраняются автоматически после синхронизации сборки.
             </p>
           </div>
         </div>
