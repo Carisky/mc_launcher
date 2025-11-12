@@ -17,7 +17,7 @@ const LANGUAGE_PRESETS = [
   { code: "kk_kz", label: "Қазақ тілі (Қазақстан)" },
   { code: "tr_tr", label: "Türkçe (Türkiye)" },
   { code: "zh_cn", label: "简体中文 (中国)" },
-  { code: "ja_jp", label: "日本語 (日本)" }
+  { code: "ja_jp", label: "日本語 (日本)" },
 ];
 
 const DEFAULT_GAME_OPTIONS_STATE = {
@@ -25,7 +25,7 @@ const DEFAULT_GAME_OPTIONS_STATE = {
   vsync: true,
   language: "ru_ru",
   updatedAt: null,
-  sources: null
+  sources: null,
 };
 
 const normalizeGameOptionsState = (raw) => {
@@ -35,7 +35,11 @@ const normalizeGameOptionsState = (raw) => {
   }
   const fpsValue = Number(raw.fpsLimit);
   if (Number.isFinite(fpsValue)) {
-    normalized.fpsLimit = clamp(Math.round(fpsValue), FPS_LIMIT_MIN, FPS_LIMIT_MAX);
+    normalized.fpsLimit = clamp(
+      Math.round(fpsValue),
+      FPS_LIMIT_MIN,
+      FPS_LIMIT_MAX
+    );
   }
   if (raw.vsync !== undefined) {
     normalized.vsync = Boolean(raw.vsync);
@@ -71,17 +75,14 @@ const PROFILE_GRADIENTS = [
 const PROFILE_GLYPHS = ["🧙", "🛡️", "🐉", "🌌", "🧊", "🦊"];
 
 const sumCharCodes = (value) =>
-  (value || "")
-    .split("")
-    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  (value || "").split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
 
 const getProfileVisuals = (profile = {}, index = 0) => {
   const seed =
     sumCharCodes(profile.id || profile.label || profile.nickname) + index;
   const gradient = PROFILE_GRADIENTS[seed % PROFILE_GRADIENTS.length];
   const glyph = PROFILE_GLYPHS[seed % PROFILE_GLYPHS.length];
-  const base =
-    (profile.nickname || profile.label || "Игрок").trim() || "Игрок";
+  const base = (profile.nickname || profile.label || "Игрок").trim() || "Игрок";
   const initial = base.slice(0, 1).toUpperCase();
   return { gradient, glyph, initial };
 };
@@ -94,7 +95,6 @@ const getTimeGreeting = () => {
   return "Добрый вечер";
 };
 
-
 const getDayPhase = (date = new Date()) => {
   const hour = date.getHours();
   if (hour >= 5 && hour < 9) return "sunrise";
@@ -106,12 +106,38 @@ const getDayPhase = (date = new Date()) => {
 const DayPhaseIcon = {
   sunrise: () => (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M10 34h28" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M14 29c2.4-4.2 6.8-7 12-7s9.6 2.8 12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M10 34h28"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 29c2.4-4.2 6.8-7 12-7s9.6 2.8 12 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx="24" cy="26" r="8" fill="#fbbf24" />
-      <path d="M24 10v5" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
-      <path d="M13 15l3.5 3.5" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
-      <path d="M35 15l-3.5 3.5" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M24 10v5"
+        stroke="#facc15"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13 15l3.5 3.5"
+        stroke="#facc15"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M35 15l-3.5 3.5"
+        stroke="#facc15"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   ),
   day: () => (
@@ -131,18 +157,52 @@ const DayPhaseIcon = {
   ),
   sunset: () => (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M10 34h28" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <path d="M14 29c2.4-4.2 6.8-7 12-7s9.6 2.8 12 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M10 34h28"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M14 29c2.4-4.2 6.8-7 12-7s9.6 2.8 12 7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <circle cx="24" cy="26" r="8" fill="#fb7185" />
-      <path d="M24 9v5" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" />
-      <path d="M13 15l3.5 3.5" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" />
-      <path d="M35 15l-3.5 3.5" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" />
-      <path d="M10 39h28" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M24 9v5"
+        stroke="#f472b6"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M13 15l3.5 3.5"
+        stroke="#f472b6"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M35 15l-3.5 3.5"
+        stroke="#f472b6"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 39h28"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   ),
   night: () => (
     <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M30.5 12.5C28.1 13.8 26.5 16.3 26.5 19c0 5 4 9 9 9 1.4 0 2.7-.3 3.9-.9C38.5 32.4 32.9 37 26 37 17.7 37 11 30.3 11 22c0-6.9 4.6-12.5 10.9-14.4-.6 1.4-.9 2.9-.9 4.4 0 5 4 9 9 9 1.5 0 3-.4 4.3-1.1z" fill="#c7d2fe" />
+      <path
+        d="M30.5 12.5C28.1 13.8 26.5 16.3 26.5 19c0 5 4 9 9 9 1.4 0 2.7-.3 3.9-.9C38.5 32.4 32.9 37 26 37 17.7 37 11 30.3 11 22c0-6.9 4.6-12.5 10.9-14.4-.6 1.4-.9 2.9-.9 4.4 0 5 4 9 9 9 1.5 0 3-.4 4.3-1.1z"
+        fill="#c7d2fe"
+      />
       <circle cx="16" cy="15" r="1.8" fill="#e0e7ff" />
       <circle cx="33" cy="11" r="1.2" fill="#e0e7ff" />
       <circle cx="18" cy="32" r="1.2" fill="#e0e7ff" />
@@ -155,7 +215,8 @@ const DAY_PHASES = {
     label: "Рассвет",
     hint: "05:00 - 08:59",
     glow: "radial-gradient(120% 120% at 100% 0%, rgba(253, 186, 116, 0.45), transparent 55%)",
-    cardBackground: "linear-gradient(135deg, rgba(253, 186, 116, 0.22), rgba(59, 130, 246, 0.15))",
+    cardBackground:
+      "linear-gradient(135deg, rgba(253, 186, 116, 0.22), rgba(59, 130, 246, 0.15))",
     cardBorder: "rgba(253, 186, 116, 0.45)",
     cardShadow: "0 16px 32px rgba(253, 186, 116, 0.28)",
     iconColor: "#fde68a",
@@ -165,7 +226,8 @@ const DAY_PHASES = {
     label: "День",
     hint: "",
     glow: "radial-gradient(120% 120% at 100% 0%, rgba(59, 130, 246, 0.35), transparent 55%)",
-    cardBackground: "linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(56, 189, 248, 0.18))",
+    cardBackground:
+      "linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(56, 189, 248, 0.18))",
     cardBorder: "rgba(96, 165, 250, 0.45)",
     cardShadow: "0 16px 32px rgba(59, 130, 246, 0.25)",
     iconColor: "#fde047",
@@ -175,7 +237,8 @@ const DAY_PHASES = {
     label: "Закат",
     hint: "",
     glow: "radial-gradient(120% 120% at 100% 0%, rgba(249, 168, 212, 0.45), transparent 55%)",
-    cardBackground: "linear-gradient(135deg, rgba(244, 114, 182, 0.2), rgba(99, 102, 241, 0.2))",
+    cardBackground:
+      "linear-gradient(135deg, rgba(244, 114, 182, 0.2), rgba(99, 102, 241, 0.2))",
     cardBorder: "rgba(244, 114, 182, 0.45)",
     cardShadow: "0 16px 32px rgba(244, 114, 182, 0.28)",
     iconColor: "#f9a8d4",
@@ -185,173 +248,170 @@ const DAY_PHASES = {
     label: "Ночь",
     hint: "",
     glow: "radial-gradient(120% 120% at 100% 0%, rgba(45, 212, 191, 0.35), transparent 55%)",
-    cardBackground: "linear-gradient(135deg, rgba(45, 212, 191, 0.18), rgba(79, 70, 229, 0.2))",
+    cardBackground:
+      "linear-gradient(135deg, rgba(45, 212, 191, 0.18), rgba(79, 70, 229, 0.2))",
     cardBorder: "rgba(129, 140, 248, 0.45)",
     cardShadow: "0 16px 32px rgba(129, 140, 248, 0.25)",
     iconColor: "#c7d2fe",
-icon: DayPhaseIcon.night,
-    },
-  };
-
-  const AmbientBackground = ({
-    imageSrc,
-    glassTint,
-    glassOpacity,
-    blurRadius,
-    fireflyConfig,
-  }) => {
-    const containerRef = useRef(null);
-    const fireflyRef = useRef(null);
-
-    useEffect(() => {
-const container = containerRef.current;
-const orb = fireflyRef.current;
-if (!container || !orb) return undefined;
-
-const padding = 56;
-let rect = container.getBoundingClientRect();
-if (!rect || rect.width <= 0 || rect.height <= 0) {
-  rect = {
-    width: container.offsetWidth || 1,
-    height: container.offsetHeight || 1,
-  };
-}
-
-const speedMultiplier = Math.max(
-  0.4,
-  Math.min(2.8, Number(fireflyConfig?.speed) || 1)
-);
-const stepBase = 0.013 * speedMultiplier;
-
-let frameId = null;
-let lastTimestamp = performance.now();
-let position = {
-  x: rect.width * 0.55,
-  y: rect.height * 0.45,
-};
-let target = { ...position };
-
-const pickTarget = () => {
-  rect = container.getBoundingClientRect();
-  const width = Math.max(0, rect.width - padding * 2);
-  const height = Math.max(0, rect.height - padding * 2);
-  target = {
-    x: padding + Math.random() * (width || 0),
-    y: padding + Math.random() * (height || 0),
-  };
+    icon: DayPhaseIcon.night,
+  },
 };
 
-const animate = (timestamp) => {
-  frameId = requestAnimationFrame(animate);
-  const dt = Math.max(16, Math.min(120, timestamp - lastTimestamp));
-  lastTimestamp = timestamp;
+const AmbientBackground = ({
+  imageSrc,
+  glassTint,
+  glassOpacity,
+  blurRadius,
+  fireflyConfig,
+}) => {
+  const containerRef = useRef(null);
+  const fireflyRef = useRef(null);
 
-  const dx = target.x - position.x;
-  const dy = target.y - position.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  const lerpFactor = Math.min(0.25, stepBase * (dt / 16.6667));
+  useEffect(() => {
+    const container = containerRef.current;
+    const orb = fireflyRef.current;
+    if (!container || !orb) return undefined;
 
-  position = {
-    x: position.x + dx * lerpFactor,
-    y: position.y + dy * lerpFactor,
-  };
-
-  orb.style.transform = `translate3d(${position.x}px, ${position.y}px, 0) translate(-50%, -50%)`;
-
-  if (!distance || distance < 24) {
-    pickTarget();
-  }
-};
-
-pickTarget();
-frameId = requestAnimationFrame(animate);
-
-const handleResize = () => {
-  rect = container.getBoundingClientRect();
-  position.x = clamp(
-    position.x,
-    padding,
-    Math.max(padding, rect.width - padding)
-  );
-  position.y = clamp(
-    position.y,
-    padding,
-    Math.max(padding, rect.height - padding)
-  );
-  pickTarget();
-};
-
-window.addEventListener("resize", handleResize);
-return () => {
-  if (frameId) {
-    cancelAnimationFrame(frameId);
-  }
-  window.removeEventListener("resize", handleResize);
-};
-    }, [fireflyConfig?.speed, imageSrc]);
-
-    const hasImage = Boolean(imageSrc);
-    const overlayColor =
-typeof glassTint === "string" && glassTint.trim()
-  ? glassTint.trim()
-  : "rgba(92, 47, 200, 0.62)";
-    const overlayOpacity =
-typeof glassOpacity === "number" && !Number.isNaN(glassOpacity)
-  ? Math.min(1, Math.max(0, glassOpacity))
-  : 0.65;
-    const blurValue =
-typeof blurRadius === "number" && !Number.isNaN(blurRadius)
-  ? Math.max(0, blurRadius)
-  : 26;
-    const fireflyColor =
-fireflyConfig?.color && typeof fireflyConfig.color === "string"
-  ? fireflyConfig.color.trim()
-  : "rgba(255, 244, 214, 0.85)";
-    const rawSize =
-fireflyConfig?.size !== undefined
-  ? Number(fireflyConfig.size)
-  : 120;
-    const fireflySize = clamp(rawSize, 60, 320);
-
-    let resolvedImage = imageSrc;
-    if (hasImage) {
-try {
-  resolvedImage = new URL(imageSrc, window.location.href).toString();
-} catch {
-  resolvedImage = imageSrc;
-}
+    const padding = 56;
+    let rect = container.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) {
+      rect = {
+        width: container.offsetWidth || 1,
+        height: container.offsetHeight || 1,
+      };
     }
 
-    return (
-<div
-  className="main-area-background"
-  data-has-image={hasImage}
-  ref={containerRef}
-  style={{
-    "--glass-tint": overlayColor,
-    "--glass-opacity": overlayOpacity,
-    "--glass-blur": `${blurValue}px`,
-    "--firefly-color": fireflyColor,
-    "--firefly-size": `${fireflySize}px`,
-  }}
->
-  <div
-    className="main-area-background-image"
-    style={
-      hasImage
-        ? { backgroundImage: `url("${resolvedImage}")` }
-        : undefined
-    }
-  />
-  <div className="main-area-background-gradient" />
-  <div className="main-area-background-glass" />
-  <div className="main-area-background-noise" />
-  <div className="main-area-firefly" ref={fireflyRef} />
-</div>
+    const speedMultiplier = Math.max(
+      0.4,
+      Math.min(2.8, Number(fireflyConfig?.speed) || 1)
     );
-  };
+    const stepBase = 0.013 * speedMultiplier;
 
-  function App() {
+    let frameId = null;
+    let lastTimestamp = performance.now();
+    let position = {
+      x: rect.width * 0.55,
+      y: rect.height * 0.45,
+    };
+    let target = { ...position };
+
+    const pickTarget = () => {
+      rect = container.getBoundingClientRect();
+      const width = Math.max(0, rect.width - padding * 2);
+      const height = Math.max(0, rect.height - padding * 2);
+      target = {
+        x: padding + Math.random() * (width || 0),
+        y: padding + Math.random() * (height || 0),
+      };
+    };
+
+    const animate = (timestamp) => {
+      frameId = requestAnimationFrame(animate);
+      const dt = Math.max(16, Math.min(120, timestamp - lastTimestamp));
+      lastTimestamp = timestamp;
+
+      const dx = target.x - position.x;
+      const dy = target.y - position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      const lerpFactor = Math.min(0.25, stepBase * (dt / 16.6667));
+
+      position = {
+        x: position.x + dx * lerpFactor,
+        y: position.y + dy * lerpFactor,
+      };
+
+      orb.style.transform = `translate3d(${position.x}px, ${position.y}px, 0) translate(-50%, -50%)`;
+
+      if (!distance || distance < 24) {
+        pickTarget();
+      }
+    };
+
+    pickTarget();
+    frameId = requestAnimationFrame(animate);
+
+    const handleResize = () => {
+      rect = container.getBoundingClientRect();
+      position.x = clamp(
+        position.x,
+        padding,
+        Math.max(padding, rect.width - padding)
+      );
+      position.y = clamp(
+        position.y,
+        padding,
+        Math.max(padding, rect.height - padding)
+      );
+      pickTarget();
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      if (frameId) {
+        cancelAnimationFrame(frameId);
+      }
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [fireflyConfig?.speed, imageSrc]);
+
+  const hasImage = Boolean(imageSrc);
+  const overlayColor =
+    typeof glassTint === "string" && glassTint.trim()
+      ? glassTint.trim()
+      : "rgba(92, 47, 200, 0.62)";
+  const overlayOpacity =
+    typeof glassOpacity === "number" && !Number.isNaN(glassOpacity)
+      ? Math.min(1, Math.max(0, glassOpacity))
+      : 0.65;
+  const blurValue =
+    typeof blurRadius === "number" && !Number.isNaN(blurRadius)
+      ? Math.max(0, blurRadius)
+      : 26;
+  const fireflyColor =
+    fireflyConfig?.color && typeof fireflyConfig.color === "string"
+      ? fireflyConfig.color.trim()
+      : "rgba(255, 244, 214, 0.85)";
+  const rawSize =
+    fireflyConfig?.size !== undefined ? Number(fireflyConfig.size) : 120;
+  const fireflySize = clamp(rawSize, 60, 320);
+
+  let resolvedImage = imageSrc;
+  if (hasImage) {
+    try {
+      resolvedImage = new URL(imageSrc, window.location.href).toString();
+    } catch {
+      resolvedImage = imageSrc;
+    }
+  }
+
+  return (
+    <div
+      className="main-area-background"
+      data-has-image={hasImage}
+      ref={containerRef}
+      style={{
+        "--glass-tint": overlayColor,
+        "--glass-opacity": overlayOpacity,
+        "--glass-blur": `${blurValue}px`,
+        "--firefly-color": fireflyColor,
+        "--firefly-size": `${fireflySize}px`,
+      }}
+    >
+      <div
+        className="main-area-background-image"
+        style={
+          hasImage ? { backgroundImage: `url("${resolvedImage}")` } : undefined
+        }
+      />
+      <div className="main-area-background-gradient" />
+      <div className="main-area-background-glass" />
+      <div className="main-area-background-noise" />
+      <div className="main-area-firefly" ref={fireflyRef} />
+    </div>
+  );
+};
+
+function App() {
   const [bootstrapped, setBootstrapped] = useState(false);
   const [modpacks, setModpacks] = useState([]);
   const [activeModpackId, setActiveModpackId] = useState(null);
@@ -398,7 +458,7 @@ try {
     downloadedBytes: 0,
     totalBytes: 0,
     stage: "idle",
-    actionError: null
+    actionError: null,
   });
   const [auth, setAuth] = useState({
     status: "unknown",
@@ -488,20 +548,14 @@ try {
         next.backgroundImage = backgroundImage;
       }
     }
-    if (
-      typeof theme.glassTint === "string" &&
-      theme.glassTint.trim()
-    ) {
+    if (typeof theme.glassTint === "string" && theme.glassTint.trim()) {
       next.glassTint = theme.glassTint.trim();
     }
     if (
       typeof theme.glassOpacity === "number" &&
       !Number.isNaN(theme.glassOpacity)
     ) {
-      next.glassOpacity = Math.min(
-        1,
-        Math.max(0, theme.glassOpacity)
-      );
+      next.glassOpacity = Math.min(1, Math.max(0, theme.glassOpacity));
     }
     if (
       typeof theme.blurRadius === "number" &&
@@ -544,7 +598,9 @@ try {
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      Object.values(serverTimersRef.current || {}).forEach((timer) => clearInterval(timer));
+      Object.values(serverTimersRef.current || {}).forEach((timer) =>
+        clearInterval(timer)
+      );
       serverTimersRef.current = {};
     };
   }, []);
@@ -618,10 +674,7 @@ try {
     [setAuth, setAuthError, setNickname]
   );
 
-  const applySettings = (
-    nextSettings,
-    opts = { preserveNickname: false }
-  ) => {
+  const applySettings = (nextSettings, opts = { preserveNickname: false }) => {
     skipSettingsSync.current = true;
     if (!opts.preserveNickname) {
       setNickname(nextSettings.nickname ?? "Player");
@@ -654,7 +707,10 @@ try {
       try {
         const response = await window.launcher.updateGameOptions(patch);
         if (response?.ok === false) {
-          throw new Error(response.error || "�?�� �?�?���>�?�?�? ����'��?��?�?�?���'�? �?���?�'�?�?�����.");
+          throw new Error(
+            response.error ||
+              "�?�� �?�?���>�?�?�? ����'��?��?�?�?���'�? �?���?�'�?�?�����."
+          );
         }
         syncGameOptionsState(response?.gameOptions || patch);
         setGameOptionsError("");
@@ -765,7 +821,7 @@ try {
         progressPercent: resetProgress ? 0 : prev.progressPercent,
         downloadedBytes: resetProgress ? 0 : prev.downloadedBytes,
         totalBytes: resetProgress ? 0 : prev.totalBytes,
-        actionError: snapshot.needsUpdate ? prev.actionError : null
+        actionError: snapshot.needsUpdate ? prev.actionError : null,
       };
     });
   }, []);
@@ -793,7 +849,7 @@ try {
           totalBytes:
             typeof payload.totalBytes === "number"
               ? payload.totalBytes
-              : prev.totalBytes
+              : prev.totalBytes,
         }));
         return;
       }
@@ -807,7 +863,7 @@ try {
             progressPercent: 0,
             downloadedBytes: 0,
             totalBytes: 0,
-            actionError: null
+            actionError: null,
           }));
           return;
         }
@@ -824,7 +880,7 @@ try {
             totalBytes:
               typeof payload.totalBytes === "number"
                 ? payload.totalBytes
-                : prev.totalBytes
+                : prev.totalBytes,
           }));
           return;
         }
@@ -832,7 +888,7 @@ try {
           setUpdateState((prev) => ({
             ...prev,
             downloading: false,
-            stage: "restarting"
+            stage: "restarting",
           }));
           return;
         }
@@ -844,7 +900,7 @@ try {
             actionError:
               payload.error ||
               prev.actionError ||
-              "Не удалось скачать обновление."
+              "Не удалось скачать обновление.",
           }));
         }
       }
@@ -861,7 +917,7 @@ try {
       progressPercent: 0,
       downloadedBytes: 0,
       totalBytes: 0,
-      actionError: null
+      actionError: null,
     }));
     try {
       const result = await window.launcher.startUpdateDownload();
@@ -873,7 +929,7 @@ try {
         ...prev,
         downloading: false,
         stage: "error",
-        actionError: err.message || "Не удалось запустить обновление."
+        actionError: err.message || "Не удалось запустить обновление.",
       }));
     }
   }, []);
@@ -884,7 +940,7 @@ try {
       ...prev,
       stage: "pending",
       actionError: null,
-      status: "checking"
+      status: "checking",
     }));
     try {
       const info = await window.launcher.refreshUpdate();
@@ -893,7 +949,7 @@ try {
       setUpdateState((prev) => ({
         ...prev,
         stage: "error",
-        actionError: err.message || "Не удалось проверить обновления."
+        actionError: err.message || "Не удалось проверить обновления.",
       }));
     }
   }, [applyUpdateSnapshot]);
@@ -937,7 +993,8 @@ try {
   };
 
   const formatBytes = (value) => {
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      return null;
     const units = ["B", "KB", "MB", "GB"];
     let size = value;
     let index = 0;
@@ -1123,8 +1180,8 @@ try {
         [serverId]: {
           ...(prev[serverId] || {}),
           loading: true,
-          error: null
-        }
+          error: null,
+        },
       }));
 
       try {
@@ -1139,8 +1196,8 @@ try {
               loading: false,
               error: null,
               data: response.status,
-              server: response.server || server
-            }
+              server: response.server || server,
+            },
           }));
         } else {
           setServerStatuses((prev) => ({
@@ -1150,8 +1207,8 @@ try {
               loading: false,
               data: response?.status || null,
               server: response?.server || server,
-              error: response?.error || "Не удалось получить статус."
-            }
+              error: response?.error || "Не удалось получить статус.",
+            },
           }));
         }
       } catch (error) {
@@ -1165,8 +1222,8 @@ try {
             loading: false,
             data: null,
             server,
-            error: error?.message || "Не удалось получить статус."
-          }
+            error: error?.message || "Не удалось получить статус.",
+          },
         }));
       }
     },
@@ -1184,13 +1241,9 @@ try {
         setModpacks(bootstrap.modpacks || []);
         setActiveModpackId(bootstrap.activeModpackId || null);
         setPaths(bootstrap.paths || {});
-        setServers(
-          Array.isArray(bootstrap.servers) ? bootstrap.servers : []
-        );
+        setServers(Array.isArray(bootstrap.servers) ? bootstrap.servers : []);
         setServerStatuses({});
-        setDefaults(
-          bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 }
-        );
+        setDefaults(bootstrap.defaults || { ramMb: 2048, minRamMb: 1024 });
         setTheme(bootstrap.theme || {});
         applySettings(settings);
         if (bootstrap.gameOptions) {
@@ -1205,7 +1258,7 @@ try {
           applyUpdateSnapshot({
             enabled: false,
             status: "disabled",
-            needsUpdate: false
+            needsUpdate: false,
           });
         }
         const initialLoginName =
@@ -1302,10 +1355,10 @@ try {
     return () => clearTimeout(handle);
   }, [nickname, ram]);
 
-const activeModpack = useMemo(
-  () => modpacks.find((pack) => pack.id === activeModpackId) || null,
-  [modpacks, activeModpackId]
-);
+  const activeModpack = useMemo(
+    () => modpacks.find((pack) => pack.id === activeModpackId) || null,
+    [modpacks, activeModpackId]
+  );
 
   const greeting = useMemo(() => getTimeGreeting(), []);
   const bannerSubtitle = useMemo(() => {
@@ -1332,8 +1385,7 @@ const activeModpack = useMemo(
   }, [nickname]);
 
   const serversLoading = useMemo(
-    () =>
-      servers.some((server) => serverStatuses[server.id]?.loading),
+    () => servers.some((server) => serverStatuses[server.id]?.loading),
     [servers, serverStatuses]
   );
 
@@ -1358,9 +1410,6 @@ const activeModpack = useMemo(
     );
     setRam(clamped);
   };
-
-
-
 
   const handleSyncMods = async () => {
     try {
@@ -1394,10 +1443,14 @@ const activeModpack = useMemo(
       setStatus("Downloading shader packs...");
       const res = await window.launcher.downloadShaderpacks();
       if (res?.ok) {
-        const count = res.copiedCount ?? (Array.isArray(res.copied) ? res.copied.length : 0);
+        const count =
+          res.copiedCount ??
+          (Array.isArray(res.copied) ? res.copied.length : 0);
         setStatus(`Shader packs ready. Updated files: ${count}.`);
       } else {
-        setStatus("Failed to download shader packs: " + (res?.error || "Unknown error"));
+        setStatus(
+          "Failed to download shader packs: " + (res?.error || "Unknown error")
+        );
       }
     } catch (err) {
       setStatus("Failed to download shader packs: " + err.message);
@@ -1412,10 +1465,15 @@ const activeModpack = useMemo(
       setStatus("Downloading resource packs...");
       const res = await window.launcher.downloadResourcepacks();
       if (res?.ok) {
-        const count = res.copiedCount ?? (Array.isArray(res.copied) ? res.copied.length : 0);
+        const count =
+          res.copiedCount ??
+          (Array.isArray(res.copied) ? res.copied.length : 0);
         setStatus(`Resource packs ready. Updated files: ${count}.`);
       } else {
-        setStatus("Failed to download resource packs: " + (res?.error || "Unknown error"));
+        setStatus(
+          "Failed to download resource packs: " +
+            (res?.error || "Unknown error")
+        );
       }
     } catch (err) {
       setStatus("Failed to download resource packs: " + err.message);
@@ -1456,7 +1514,9 @@ const activeModpack = useMemo(
         ensureOk(shaderResult, "не удалось обновить шейдеры");
         const shaderCount =
           shaderResult?.copiedCount ??
-          (Array.isArray(shaderResult?.copied) ? shaderResult.copied.length : 0);
+          (Array.isArray(shaderResult?.copied)
+            ? shaderResult.copied.length
+            : 0);
         setStatus(
           shaderCount
             ? `Шейдеры обновлены (${shaderCount}).`
@@ -1472,7 +1532,9 @@ const activeModpack = useMemo(
         ensureOk(resourceResult, "не удалось обновить ресурспаки");
         const resourcesCount =
           resourceResult?.copiedCount ??
-          (Array.isArray(resourceResult?.copied) ? resourceResult.copied.length : 0);
+          (Array.isArray(resourceResult?.copied)
+            ? resourceResult.copied.length
+            : 0);
         setStatus(
           resourcesCount
             ? `Ресурспаки обновлены (${resourcesCount}).`
@@ -1494,7 +1556,9 @@ const activeModpack = useMemo(
       setDownloadingShaders(false);
       setDownloadingResources(false);
       setLaunching(false);
-      setStatus("Не удалось подготовить запуск: " + (error?.message || String(error)));
+      setStatus(
+        "Не удалось подготовить запуск: " + (error?.message || String(error))
+      );
     }
   };
 
@@ -1519,7 +1583,8 @@ const activeModpack = useMemo(
     }
   };
 
-  const playBusy = syncing || downloadingShaders || downloadingResources || launching;
+  const playBusy =
+    syncing || downloadingShaders || downloadingResources || launching;
 
   const progressPercent =
     progress && progress.task && progress.task.total
@@ -1555,8 +1620,7 @@ const activeModpack = useMemo(
   } else if (updateState.stage === "downloaded") {
     updateStatusText = "Загрузка завершена. Подготовка к установке.";
   } else if (updateState.stage === "restarting") {
-    updateStatusText =
-      "Перезапускаем лаунчер, чтобы завершить установку.";
+    updateStatusText = "Перезапускаем лаунчер, чтобы завершить установку.";
   } else if (updateState.stage === "error") {
     updateStatusText =
       updateState.actionError ||
@@ -1589,14 +1653,12 @@ const activeModpack = useMemo(
             <div className="update-meta">
               {updateState.currentVersion && (
                 <span>
-                  Текущая версия:{" "}
-                  <strong>{updateState.currentVersion}</strong>
+                  Текущая версия: <strong>{updateState.currentVersion}</strong>
                 </span>
               )}
               {updateState.latestVersion && (
                 <span>
-                  Новая версия:{" "}
-                  <strong>{updateState.latestVersion}</strong>
+                  Новая версия: <strong>{updateState.latestVersion}</strong>
                 </span>
               )}
             </div>
@@ -1611,8 +1673,7 @@ const activeModpack = useMemo(
                   />
                 </div>
                 <span>
-                  {updatePercent}%
-                  {downloadedText ? ` - ${downloadedText}` : ""}
+                  {updatePercent}%{downloadedText ? ` - ${downloadedText}` : ""}
                   {totalText ? ` / ${totalText}` : ""}
                 </span>
               </div>
@@ -1620,12 +1681,9 @@ const activeModpack = useMemo(
             {updateState.stage === "error" && updateState.actionError && (
               <div className="update-error">{updateState.actionError}</div>
             )}
-            {updateState.releaseNotes &&
-              updateState.releaseNotes.trim() && (
-                <div className="update-notes">
-                  {updateState.releaseNotes}
-                </div>
-              )}
+            {updateState.releaseNotes && updateState.releaseNotes.trim() && (
+              <div className="update-notes">{updateState.releaseNotes}</div>
+            )}
             <div className="update-actions">
               <button
                 type="button"
@@ -1661,7 +1719,11 @@ const activeModpack = useMemo(
           <div className="sidebar-header">
             <h2>Account</h2>
           </div>
-          <div className={`auth-card${auth.status === "authenticated" ? " authenticated" : ""}`}>
+          <div
+            className={`auth-card${
+              auth.status === "authenticated" ? " authenticated" : ""
+            }`}
+          >
             {auth.status === "authenticated" ? (
               <div className="auth-summary">
                 <div className="auth-identity">
@@ -1813,9 +1875,7 @@ const activeModpack = useMemo(
                   </div>
                 </form>
               )}
-            {authError && (
-              <div className="auth-error">{authError}</div>
-            )}
+            {authError && <div className="auth-error">{authError}</div>}
           </div>
         </div>
         <div className="sidebar-section highlight">
@@ -1867,264 +1927,276 @@ const activeModpack = useMemo(
         />
         <div className="main-area-content">
           <section
-          className="user-banner"
-          style={{ "--banner-glow": phaseVisual.glow }}
-        >
-          <div
-            className="user-banner-avatar"
-            style={{ background: bannerVisuals.gradient }}
+            className="user-banner"
+            style={{ "--banner-glow": phaseVisual.glow }}
           >
-            <span className="user-banner-icon" aria-hidden="true">
-              {bannerVisuals.glyph || bannerVisuals.initial}
-            </span>
-          </div>
-          <div className="user-banner-content">
-            <p className="user-greeting">
-              {greeting}, {nickname || "Игрок"}!
-            </p>
-            <div className="user-banner-footer">
-              <span>{profileSummary}</span>
-            </div>
-          </div>
-          <div
-            className="user-banner-moment"
-            style={{
-              background: phaseVisual.cardBackground,
-              borderColor: phaseVisual.cardBorder,
-              boxShadow: phaseVisual.cardShadow,
-              "--moment-icon-color": phaseVisual.iconColor,
-            }}
-          >
-            <span className="user-banner-moment-icon">
-              <MomentIcon />
-            </span>
-            <span className="user-banner-moment-label">
-              <span className="user-banner-moment-clock">{timeDisplay}</span>
-              <span className="user-banner-moment-sub">
-                <span className="user-banner-moment-name">{phaseVisual.label}</span>
-                <span className="user-banner-moment-time">{phaseVisual.hint}</span>
-              </span>
-            </span>
-          </div>
-        </section>
-        <header className="main-header">
-          <div>
-            <h1>
-              {activeModpack ? activeModpack.name : "Minecraft Launcher"}
-            </h1>
-            <p className="subtitle">
-              {activeModpack
-                ? activeModpack.description || "Forge 1.12.2"
-                : "Forge 1.12.2"}
-            </p>
-          </div>
-          <div className="header-actions">
-            <button
-              type="button"
-              className="icon-button settings-trigger"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="Открыть настройки"
-              title="Открыть настройки"
+            <div
+              className="user-banner-avatar"
+              style={{ background: bannerVisuals.gradient }}
             >
-            Настройки
-            </button>
-          </div>
-        </header>
-        <section className="card action-flow" id="quick-start">
-          <div className="flow-header">
-            <div className="flow-title">
-              <span className="flow-badge">Быстрый старт</span>
-              <p className="subtitle">Кнопка «Играть» возьмёт на себя подготовку сборки перед стартом.</p>
+              <span className="user-banner-icon" aria-hidden="true">
+                {bannerVisuals.glyph || bannerVisuals.initial}
+              </span>
             </div>
-          </div>
-          <div className="flow-track">
-            <article className="flow-card flow-card--launch" id="step-launch">
-              <div className="flow-card-head">
-                <span className="flow-icon flow-icon--launch" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="8" />
-                    <path d="M10 9.5l6 3.5-6 3.5z" />
-                  </svg>
-                </span>
-                <div>
-                  <h3>Запускай игру</h3>
-                </div>
+            <div className="user-banner-content">
+              <p className="user-greeting">
+                {greeting}, {nickname || "Игрок"}!
+              </p>
+              <div className="user-banner-footer">
+                <span>{profileSummary}</span>
               </div>
-              <div className="flow-actions">
-                <button
-                  className="primary flow-button"
-                  onClick={handlePlay}
-                  disabled={playBusy}
-                >
-                  {playBusy ? "Готовим к запуску..." : "Играть"}
-                </button>
-                <p className="flow-status">{status}</p>
-              </div>
-              {progress && progressPercent > 0 && (
-                <div className="flow-progress">
-                  <div className="progress">
-                    <div
-                      className="progress-bar"
-                      style={{ width: `${progressPercent}%` }}
-                    />
-                  </div>
-                  <span className="progress-text">
-                    {progressPercent}% -{" "}
-                    {progress.type || "Подготовка окружения"}
+            </div>
+            <div
+              className="user-banner-moment"
+              style={{
+                background: phaseVisual.cardBackground,
+                borderColor: phaseVisual.cardBorder,
+                boxShadow: phaseVisual.cardShadow,
+                "--moment-icon-color": phaseVisual.iconColor,
+              }}
+            >
+              <span className="user-banner-moment-icon">
+                <MomentIcon />
+              </span>
+              <span className="user-banner-moment-label">
+                <span className="user-banner-moment-clock">{timeDisplay}</span>
+                <span className="user-banner-moment-sub">
+                  <span className="user-banner-moment-name">
+                    {phaseVisual.label}
                   </span>
-                </div>
-              )}
-            </article>
-          </div>
-        </section>
-
-
-        {servers.length > 0 && (
-          <section className="card server-card">
-            <div className="server-card-header">
-              <div>
-                <h2>Статус сервера</h2>
+                  <span className="user-banner-moment-time">
+                    {phaseVisual.hint}
+                  </span>
+                </span>
+              </span>
+            </div>
+          </section>
+          <header className="main-header">
+            <div>
+              <h1>
+                {activeModpack ? activeModpack.name : "Minecraft Launcher"}
+              </h1>
+              <p className="subtitle">
+                {activeModpack
+                  ? activeModpack.description || "Forge 1.12.2"
+                  : "Forge 1.12.2"}
+              </p>
+            </div>
+            <div className="header-actions">
+              <button
+                type="button"
+                className="icon-button settings-trigger"
+                onClick={() => setSettingsOpen(true)}
+                aria-label="Открыть настройки"
+                title="Открыть настройки"
+              >
+                Настройки
+              </button>
+            </div>
+          </header>
+          <section className="card action-flow" id="quick-start">
+            <div className="flow-header">
+              <div className="flow-title">
+                <span className="flow-badge">Быстрый старт</span>
                 <p className="subtitle">
-                  Онлайн, TPS и пинг вашего сервера в реальном времени.
+                  Кнопка «Играть» возьмёт на себя подготовку сборки перед
+                  стартом.
                 </p>
               </div>
-              {canFetchServerStatus ? (
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={handleServerStatusRefresh}
-                  disabled={serversLoading}
-                >
-                  {serversLoading ? "Обновляем..." : "Обновить"}
-                </button>
-              ) : (
-                <span className="server-card-hint">
-                  Обновление недоступно в этой сборке
-                </span>
-              )}
             </div>
+            <div className="flow-track">
+              <article className="flow-card flow-card--launch" id="step-launch">
+                <div className="flow-card-head">
+                  <span
+                    className="flow-icon flow-icon--launch"
+                    aria-hidden="true"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="8" />
+                      <path d="M10 9.5l6 3.5-6 3.5z" />
+                    </svg>
+                  </span>
+                  <div>
+                    <h3>Запускай игру</h3>
+                  </div>
+                </div>
+                <div className="flow-actions">
+                  <button
+                    className="primary flow-button"
+                    onClick={handlePlay}
+                    disabled={playBusy}
+                  >
+                    {playBusy ? "Готовим к запуску..." : "Играть"}
+                  </button>
+                  <p className="flow-status">{status}</p>
+                </div>
+                {progress && progressPercent > 0 && (
+                  <div className="flow-progress">
+                    <div className="progress">
+                      <div
+                        className="progress-bar"
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                    <span className="progress-text">
+                      {progressPercent}% -{" "}
+                      {progress.type || "Подготовка окружения"}
+                    </span>
+                  </div>
+                )}
+              </article>
+            </div>
+          </section>
 
-            {!canFetchServerStatus && (
-              <p className="server-status-hint">
-                Добавьте поддержку обновления статуса в preload, чтобы
-                включить автоматическое обновление.
-              </p>
-            )}
+          {servers.length > 0 && (
+            <section className="card server-card">
+              <div className="server-card-header">
+                <div>
+                  <h2>Статус сервера</h2>
+                  <p className="subtitle">
+                    Онлайн, TPS и пинг вашего сервера в реальном времени.
+                  </p>
+                </div>
+                {canFetchServerStatus ? (
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={handleServerStatusRefresh}
+                    disabled={serversLoading}
+                  >
+                    {serversLoading ? "Обновляем..." : "Обновить"}
+                  </button>
+                ) : (
+                  <span className="server-card-hint">
+                    Обновление недоступно в этой сборке
+                  </span>
+                )}
+              </div>
 
-            <div className="server-status-list">
-              {servers.map((server) => {
-                const entry = serverStatuses[server.id] || {};
-                const data = entry.data;
-                const icon = data?.icon;
-                const serverInfo = entry.server || server;
-                const name = serverInfo?.name || server.name;
-                const displayAddress = getServerDisplayAddress(serverInfo);
-                const online = Boolean(data?.online);
-                const playersOnline =
-                  typeof data?.playersOnline === "number"
-                    ? data.playersOnline
-                    : null;
-                const playersMax =
-                  typeof data?.playersMax === "number"
-                    ? data.playersMax
-                    : null;
-                const latency = data?.latencyMs;
-                const tps = data?.tps;
-                const lastUpdated = data?.fetchedAt;
-                const error = entry.error;
-                const loading = entry.loading;
-                const fallbackGradient =
-                  PROFILE_GRADIENTS[
-                    sumCharCodes(server.id || server.address) %
-                      PROFILE_GRADIENTS.length
-                  ];
-                const initial =
-                  (
+              {!canFetchServerStatus && (
+                <p className="server-status-hint">
+                  Добавьте поддержку обновления статуса в preload, чтобы
+                  включить автоматическое обновление.
+                </p>
+              )}
+
+              <div className="server-status-list">
+                {servers.map((server) => {
+                  const entry = serverStatuses[server.id] || {};
+                  const data = entry.data;
+                  const icon = data?.icon;
+                  const serverInfo = entry.server || server;
+                  const name = serverInfo?.name || server.name;
+                  const displayAddress = getServerDisplayAddress(serverInfo);
+                  const online = Boolean(data?.online);
+                  const playersOnline =
+                    typeof data?.playersOnline === "number"
+                      ? data.playersOnline
+                      : null;
+                  const playersMax =
+                    typeof data?.playersMax === "number"
+                      ? data.playersMax
+                      : null;
+                  const latency = data?.latencyMs;
+                  const tps = data?.tps;
+                  const lastUpdated = data?.fetchedAt;
+                  const error = entry.error;
+                  const loading = entry.loading;
+                  const fallbackGradient =
+                    PROFILE_GRADIENTS[
+                      sumCharCodes(server.id || server.address) %
+                        PROFILE_GRADIENTS.length
+                    ];
+                  const initial = (
                     (name || displayAddress || "S").trim().charAt(0) || "S"
                   ).toUpperCase();
 
-                return (
-                  <article className="server-status-entry" key={server.id}>
-                    <div
-                      className="server-status-avatar"
-                      style={{ background: fallbackGradient }}
-                    >
-                      {icon ? (
-                        <img src={icon} alt={`${name} icon`} />
-                      ) : (
-                        <span>{initial}</span>
-                      )}
-                    </div>
-                    <div className="server-status-body">
-                      <div className="server-status-header">
-                        <div className="server-status-title">
-                          <span
-                            className={`status-dot ${
-                              online ? "online" : "offline"
-                            }`}
-                            aria-hidden="true"
-                          />
-                          <span>{name}</span>
-                        </div>
-                        <span className="server-status-updated">
-                          {loading
-                            ? "Обновляем..."
-                            : data
-                            ? `Обновлено ${formatRelativeTime(lastUpdated)}`
-                            : canFetchServerStatus
-                            ? "Ожидаем данные"
-                            : "Недоступно"}
-                        </span>
+                  return (
+                    <article className="server-status-entry" key={server.id}>
+                      <div
+                        className="server-status-avatar"
+                        style={{ background: fallbackGradient }}
+                      >
+                        {icon ? (
+                          <img src={icon} alt={`${name} icon`} />
+                        ) : (
+                          <span>{initial}</span>
+                        )}
                       </div>
-                      <div className="server-status-address">
-                        IP: <code>{displayAddress}</code>
+                      <div className="server-status-body">
+                        <div className="server-status-header">
+                          <div className="server-status-title">
+                            <span
+                              className={`status-dot ${
+                                online ? "online" : "offline"
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span>{name}</span>
+                          </div>
+                          <span className="server-status-updated">
+                            {loading
+                              ? "Обновляем..."
+                              : data
+                              ? `Обновлено ${formatRelativeTime(lastUpdated)}`
+                              : canFetchServerStatus
+                              ? "Ожидаем данные"
+                              : "Недоступно"}
+                          </span>
+                        </div>
+                        <div className="server-status-address">
+                          IP: <code>{displayAddress}</code>
+                        </div>
+                        <div className="server-status-meta">
+                          <div>
+                            <span className="meta-label">Статус</span>
+                            <span
+                              className={`meta-value ${
+                                online ? "online" : "offline"
+                              }`}
+                            >
+                              {online ? "Онлайн" : "Оффлайн"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="meta-label">Игроки</span>
+                            <span className="meta-value">
+                              {formatPlayers(playersOnline, playersMax)}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="meta-label">TPS</span>
+                            <span className="meta-value">
+                              {online ? formatTps(tps) : "-"}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="meta-label">Пинг</span>
+                            <span className="meta-value">
+                              {online ? formatLatency(latency) : "-"}
+                            </span>
+                          </div>
+                        </div>
+                        {data?.motd && (
+                          <p className="server-motd">{data.motd}</p>
+                        )}
+                        {error && !loading && (
+                          <p className="server-status-error">{error}</p>
+                        )}
                       </div>
-                      <div className="server-status-meta">
-                        <div>
-                          <span className="meta-label">Статус</span>
-                          <span
-                            className={`meta-value ${
-                              online ? "online" : "offline"
-                            }`}
-                          >
-                            {online ? "Онлайн" : "Оффлайн"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="meta-label">Игроки</span>
-                          <span className="meta-value">
-                            {formatPlayers(playersOnline, playersMax)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="meta-label">TPS</span>
-                          <span className="meta-value">
-                            {online ? formatTps(tps) : "-"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="meta-label">Пинг</span>
-                          <span className="meta-value">
-                            {online ? formatLatency(latency) : "-"}
-                          </span>
-                        </div>
-                      </div>
-                      {data?.motd && (
-                        <p className="server-motd">{data.motd}</p>
-                      )}
-                      {error && !loading && (
-                        <p className="server-status-error">{error}</p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-
-
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       </main>
       {settingsOpen && (
@@ -2145,7 +2217,7 @@ const activeModpack = useMemo(
                 <span className="settings-tag">Настройки</span>
                 <h2 id="settings-title">Профиль и память</h2>
                 <p className="settings-subtitle">
-                  Выбирайте ник и объём оперативной памяти Рґля выбранной сборки.
+                  Выбирайте ник и объём оперативной памяти Для выбранной сборки.
                 </p>
               </div>
               <button
@@ -2155,7 +2227,14 @@ const activeModpack = useMemo(
                 aria-label="Закрыть настройки"
                 title="Закрыть настройки"
               >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -2175,130 +2254,152 @@ const activeModpack = useMemo(
                   onBlur={commitRamValue}
                 />
                 <span className="hint">
-                  Минимум {defaults.minRamMb || 1024} МБ. Рекомендуемо от {Math.max(defaults.ramMb, defaults.minRamMb)} МБ.
+                  Минимум {defaults.minRamMb || 1024} МБ. Рекомендуемо от{" "}
+                  {Math.max(defaults.ramMb, defaults.minRamMb)} МБ.
                 </span>
               </label>
 
-
-              <div className="settings-card">
-                <div className="settings-card-head">
-                  <div>
-                    <span className="settings-card-title">FPS и плавность</span>
-                    <p className="settings-card-subtitle">
-                      Управляйте V-Sync и ограничением FPS прямо из лаунчера перед запуском.
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className="fps-mode-toggle"
-                  role="group"
-                  aria-label="Режим частоты кадров"
-                >
-                  <button
-                    type="button"
-                    aria-pressed={fpsMode === "vsync"}
-                    className={fpsMode === "vsync" ? "active" : ""}
-                    onClick={() => handleFpsModeChange("vsync")}
-                  >
-                    V-Sync
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={fpsMode === "limit"}
-                    className={fpsMode === "limit" ? "active" : ""}
-                    onClick={() => handleFpsModeChange("limit")}
-                  >
-                    Лимит FPS
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={fpsMode === "unlimited"}
-                    className={fpsMode === "unlimited" ? "active" : ""}
-                    onClick={() => handleFpsModeChange("unlimited")}
-                  >
-                    Без лимита
-                  </button>
-                </div>
-                <div className="fps-limit-input">
-                  <input
-                    id="fps-limit-input"
-                    type="number"
-                    min={FPS_LIMIT_MIN}
-                    max={FPS_LIMIT_MAX}
-                    step="5"
-                    value={fpsInput}
-                    onChange={(event) =>
-                      handleFpsInputChange(event.target.value)
-                    }
-                    onBlur={commitFpsInput}
-                    onKeyDown={handleFpsInputKeyDown}
-                  />
-                  <span className="hint">
-                    Введите любое значение от {FPS_LIMIT_MIN} до {FPS_LIMIT_MAX} FPS.
-                    При вводе режим «Лимит FPS» выбирается автоматически.
-                  </span>
-                </div>
-                <div className="settings-meta">
-                  <span className="settings-pill">Выбрано: {fpsSummary}</span>
-                  <span className="settings-pill">
-                    Текущее значение: {fpsInput || String(gameOptions.fpsLimit)} FPS
-                  </span>
-                </div>
-              </div>
-              <div className="settings-card">
-                <div className="settings-card-head">
-                  <div>
-                    <span className="settings-card-title">Язык клиента</span>
-                    <p className="settings-card-subtitle">
-                      Введите официальный код Mojang (ru_ru, en_us, uk_ua и т.д.).
-                    </p>
-                  </div>
-                </div>
-                <div className="language-input">
-                  <input
-                    type="text"
-                    value={languageInput}
-                    placeholder="ru_ru"
-                    list="game-language-options"
-                    onChange={(event) =>
-                      handleLanguageInputChange(event.target.value)
-                    }
-                    onBlur={handleLanguageBlur}
-                  />
-                  <span className="hint">
-                    Код автоматически синхронизируется с options.txt и optionsof.txt.
-                  </span>
-                  <datalist id="game-language-options">
-                    {LANGUAGE_PRESETS.map((lang) => (
-                      <option key={lang.code} value={lang.code}>
-                        {lang.label}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
-                <div className="settings-meta">
-                  <span className="settings-pill">Текущий код: {languageSummary}</span>
-                </div>
-              </div>
-              <div
-                className={`game-options-status ${
-                  gameOptionsSaving ? "saving" : ""
-                }`}
-              >
-                <span>{gameOptionsStatusText}</span>
-              </div>
+              <div className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <span className="settings-card-title">FPS и плавность</span>
+
+                    <p className="settings-card-subtitle">
+                      Управляйте V-Sync и ограничением FPS прямо из лаунчера
+                      перед запуском.
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="fps-mode-toggle"
+                  role="group"
+                  aria-label="Режим частоты кадров"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "vsync"}
+                    className={fpsMode === "vsync" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("vsync")}
+                  >
+                    V-Sync
+                  </button>
+
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "limit"}
+                    className={fpsMode === "limit" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("limit")}
+                  >
+                    Лимит FPS
+                  </button>
+
+                  <button
+                    type="button"
+                    aria-pressed={fpsMode === "unlimited"}
+                    className={fpsMode === "unlimited" ? "active" : ""}
+                    onClick={() => handleFpsModeChange("unlimited")}
+                  >
+                    Без лимита
+                  </button>
+                </div>
+
+                <div className="fps-limit-input">
+                  <input
+                    id="fps-limit-input"
+                    type="number"
+                    min={FPS_LIMIT_MIN}
+                    max={FPS_LIMIT_MAX}
+                    step="5"
+                    value={fpsInput}
+                    onChange={(event) =>
+                      handleFpsInputChange(event.target.value)
+                    }
+                    onBlur={commitFpsInput}
+                    onKeyDown={handleFpsInputKeyDown}
+                  />
+
+                  <span className="hint">
+                    Введите любое значение от {FPS_LIMIT_MIN} до {FPS_LIMIT_MAX}{" "}
+                    FPS. При вводе режим «Лимит FPS» выбирается автоматически.
+                  </span>
+                </div>
+
+                <div className="settings-meta">
+                  <span className="settings-pill">Выбрано: {fpsSummary}</span>
+
+                  <span className="settings-pill">
+                    Текущее значение: {fpsInput || String(gameOptions.fpsLimit)}{" "}
+                    FPS
+                  </span>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <span className="settings-card-title">Язык клиента</span>
+
+                    <p className="settings-card-subtitle">
+                      Введите официальный код Mojang (ru_ru, en_us, uk_ua и
+                      т.д.).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="language-input">
+                  <input
+                    type="text"
+                    value={languageInput}
+                    placeholder="ru_ru"
+                    list="game-language-options"
+                    onChange={(event) =>
+                      handleLanguageInputChange(event.target.value)
+                    }
+                    onBlur={handleLanguageBlur}
+                  />
+
+                  <span className="hint">
+                    Код автоматически синхронизируется с options.txt и
+                    optionsof.txt.
+                  </span>
+
+                  <datalist id="game-language-options">
+                    {LANGUAGE_PRESETS.map((lang) => (
+                      <option key={lang.code} value={lang.code}>
+                        {lang.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="settings-meta">
+                  <span className="settings-pill">
+                    Текущий код: {languageSummary}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                className={`game-options-status ${
+                  gameOptionsSaving ? "saving" : ""
+                }`}
+              >
+                <span>{gameOptionsStatusText}</span>
+              </div>
+
               {gameOptionsError && (
                 <p className="settings-error">{gameOptionsError}</p>
               )}
             </div>
             <p className="settings-hint">
-              Совет: параметры профиля и игры сохраняются автоматически после синхронизации сборки.
+              Совет: параметры профиля и игры сохраняются автоматически после
+              синхронизации сборки.
             </p>
           </div>
         </div>
       )}
-
-  </div>
+    </div>
   );
 }
 

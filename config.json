@@ -9,8 +9,8 @@
   ],
   "AUTH": {
     "provider": "drasl",
-    "domain": "83-168-78-65.nip.io",
-    "baseUrl": "http://83-168-78-65.nip.io",
+    "domain": "drasl.83-168-78-65.nip.io",
+    "baseUrl": "https://drasl.83-168-78-65.nip.io",
     "allowRegistration": true,
     "authlibInjector": {
       "version": "1.2.6",
