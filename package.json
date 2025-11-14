@@ -1,6 +1,6 @@
 {
   "name": "mc-launcher",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "main": "main.js",
   "description": "Yolka launcher for minecraft",
   "author": "Custom Launcher Team",
@@ -61,6 +61,9 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
+    },
+    "portable": {
+      "artifactName": "Compass MC.${ext}"
     }
   }
 }

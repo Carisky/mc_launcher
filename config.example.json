@@ -25,7 +25,7 @@
     "github": {
       "OWNER": "your-github",
       "REPO": "mc-launcher-distro",
-      "ASSET_NAME": "Compass MC Launcher Portable.exe"
+      "ASSET_NAME": "Compass MC.exe"
     }
   },
   "UI_THEME": {
